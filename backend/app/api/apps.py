@@ -232,3 +232,71 @@ def group_report(
         },
         "members": members,
     }
+
+
+@router.get("/groups/{group_id}/daily")
+def group_daily(group_id: int, days: int = Query(7, ge=1, le=90), db: Session = Depends(get_db)):
+    """일별 리포트: 멤버별 날짜별 평균/최대/피크 시간(KST), 방향별 평균."""
+    from datetime import timedelta as _td
+
+    g = db.get(AppGroup, group_id)
+    if not g:
+        raise HTTPException(404, "그룹 없음")
+    thr = get_settings().congestion_thresholds
+    kst = timezone(_td(hours=9))
+    since = datetime.now(timezone.utc) - _td(days=days)
+    cam_ids = [m.camera_id for m in g.members]
+    S = OccupancySample
+    rows = (
+        db.query(S.camera_id, S.direction_index, S.ts, S.occupancy, S.n_car + S.n_bus + S.n_truck)
+        .filter(S.camera_id.in_(cam_ids or [0]), S.source == "live", S.ts >= since)
+        .all()
+    )
+    acc: dict[tuple[int, int, str], dict] = {}
+    hours: dict[tuple[int, str], dict[int, list]] = {}
+    for cid, d, ts, occ, nv in rows:
+        k = ts.astimezone(kst)
+        day = k.strftime("%Y-%m-%d")
+        a = acc.setdefault((cid, d, day), {"sum": 0.0, "n": 0, "max": 0.0, "veh": 0.0, "jam": 0})
+        a["sum"] += occ
+        a["n"] += 1
+        a["max"] = max(a["max"], occ)
+        a["veh"] += float(nv or 0)
+        if occ >= thr[-1]:
+            a["jam"] += 1
+        if d == 0:
+            hours.setdefault((cid, day), {}).setdefault(k.hour, []).append(occ)
+    labels = {m.camera_id: (m.label or (m.camera.name if m.camera else str(m.camera_id))) for m in g.members}
+    dnames = {(d.camera_id, d.index): d.name for d in db.query(Direction).filter(Direction.camera_id.in_(cam_ids or [0])).all()}
+    days_sorted = sorted({k[2] for k in acc})
+    members = []
+    for cid in cam_ids:
+        per_day = []
+        for day in days_sorted:
+            a = acc.get((cid, 0, day))
+            if not a:
+                per_day.append({"day": day, "mean": None})
+                continue
+            hh = hours.get((cid, day), {})
+            peak_hour = max(hh, key=lambda h: sum(hh[h]) / len(hh[h])) if hh else None
+            dirs = []
+            for (c2, d), name in dnames.items():
+                if c2 != cid:
+                    continue
+                ad = acc.get((cid, d, day))
+                dirs.append({"index": d, "name": name, "mean": ad["sum"] / ad["n"] if ad else None})
+            per_day.append(
+                {
+                    "day": day,
+                    "mean": a["sum"] / a["n"],
+                    "max": a["max"],
+                    "level": congestion_level(a["sum"] / a["n"], thr),
+                    "peak_hour": peak_hour,
+                    "jam_ratio": a["jam"] / a["n"],
+                    "n_vehicles": a["veh"] / a["n"],
+                    "samples": a["n"],
+                    "directions": sorted(dirs, key=lambda x: x["index"]),
+                }
+            )
+        members.append({"camera_id": cid, "label": labels.get(cid), "days": per_day})
+    return {"group_id": group_id, "days": days_sorted, "members": members, "thresholds": thr}

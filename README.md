@@ -15,13 +15,21 @@
 
 | 경로 | 내용 |
 |---|---|
-| `/` 지도 | 등록 CCTV 를 지도에 혼잡 단계 색으로 표시. 클릭하면 실시간 세그멘테이션 영상과 방향별 점유율 |
-| `/register` CCTV 등록 | ① ITS 검색(지도 영역)/업로드/URL → ② SAM3·브러시로 도로 영역과 **방향** 지정 → ③ 이름·노선·지역·구간 저장 |
-| `/cameras` 전체 보기 | 모든 CCTV 의 실시간 세그멘테이션 스트림을 격자로. **차종 구분 모드 / 차량 단일 모드** 전환 |
-| `/cameras/:id` 상세 | 큰 실시간 화면(차종별·단일·도로만·원본), 방향별 게이지, 점유율 추이 차트, 마스크 재편집, 업로드 영상 전체 분석, 원본 HLS |
-| `/stats` 점유율 통계 | 노선별 / 지역별 / 구간별 / 카메라별 최근 N분 평균 점유율 (방향별 포함) |
-| `/apps` 응용 분석 | CCTV 그룹 리포트. 프리셋 **한강 대교**: 교량별 점유율 비교, 방향 불균형, 시간대 프로필, 자동 정책 인사이트 |
-| `/system` 시스템 | 모델/ITS 키/임계값/워커 상태 |
+| `/` 지도 관제 | KPI(등록/평균 점유율/지체·정체 수/검출 차량), 혼잡 단계 색 마커, 검색·노선·단계 필터, **타임라인 재생**(최근 1~24시간을 슬라이더로 되감기), 선택 카메라의 실시간 세그멘테이션·방향별 점유율·스파크라인. 카메라가 없으면 온보딩 안내 + "샘플로 시작" |
+| `/register` CCTV 등록 | 3단계 스테퍼. ① ITS 실시간 CCTV(지도를 움직이면 자동 검색, 등록된 것 표시) / 드래그&드롭 업로드 / URL → ② **마스크 편집기** → ③ 정보 입력 + 미리보기 |
+| `/cameras` 전체 CCTV | 격자(실시간 MJPEG, 차종 구분/단일 모드, HUD, 열 수) 와 **표 보기**(이름·지역 편집, 일괄 시작/정지/삭제) |
+| `/cameras/:id` 상세 | 방향별 KPI(15분 평균 대비 추세), 실시간 화면(차종별·단일·도로만·원본, 원본 HLS), **캡처 저장**, 추이 차트(차량 수 막대, 혼잡 밴드, 다른 카메라와 비교, CSV), 혼잡 경보 목록, 요일×시간 히트맵, 업로드 영상 전체 분석, 마스크 재편집 |
+| `/stats` 점유율 통계 | 노선/지역/구간/카메라별 최근 N분 평균, 정렬 표 + 스파크라인, 그룹 추이 차트, 지체 이상 경보 목록, CSV |
+| `/apps` 응용 분석 | 그룹 리포트(프리셋 **한강 대교** 26개 교량). 현황 비교(방향별 막대, 시간대 프로필, 추이, 자동 인사이트), **일별 리포트**(날짜×교량 표, 피크 시간), **정책 시나리오**(통행 분산 시 점유율 추정), CSV·인쇄(PDF) |
+| `/system` 시스템 | 모델·ITS·임계값·워커 상태, 샘플 카메라 생성 |
+
+### 마스크 편집기 (등록 2단계)
+
+- **도로 자동 제안**: SAM3 가 있으면 텍스트 "road", 없으면 SAM2.1 로 화면 하단 여러 점을 추론해 합칩니다 → 노란 미리보기를 원하는 방향 버튼으로 추가
+- **SAM 점**(클릭 포함 / Shift·우클릭 제외) · **SAM 박스**(드래그) · **브러시 / 지우개**(픽셀 단위) · **다각형**(채우기 / 도로만 재할당)
+- **분할선**: 중앙분리대를 따라 선을 긋고 적용하면 도로 픽셀이 선 왼쪽/오른쪽 방향으로 나뉩니다 (양방향 도로를 가장 빠르게 나누는 방법)
+- 휠 확대, Space+드래그 이동, 실행취소/다시실행, 구멍 메우기, 단축키(S/X/B/E/P/L/H, [ ], 1~6, Enter, Esc)
+- 검증: 도로 비율이 너무 작거나 방향에 픽셀이 없으면 경고
 
 혼잡 단계(기본): 원활 < 8% ≤ 서행 < 15% ≤ 지체 < 25% ≤ 정체. `.env` 의 `CONGESTION_THRESHOLDS` 로 변경.
 
@@ -54,10 +62,10 @@ traffic_project/
 요구: Python ≥ 3.10, Node ≥ 18, PostgreSQL, ffmpeg(OpenCV 내장 FFmpeg 로 HLS 읽음).
 
 ```bash
-# 1) 파이썬 가상환경 + 패키지 + .env + DB + 프론트 패키지
-bash scripts/setup.sh
-#    (이미 torch/ultralytics 가 있는 conda 환경을 쓰려면: PYTHON=/opt/anaconda3/envs/VITA/bin/python 로 실행하거나
-#     그 환경에 `pip install -r requirements.txt` 만 하면 됩니다)
+# 1) 파이썬 가상환경(.venv) + 패키지 + .env + DB + 프론트 패키지
+bash scripts/setup.sh              # 기본은 python3 로 .venv 생성. 특정 버전: PYTHON=/opt/homebrew/bin/python3.13 bash scripts/setup.sh
+#    이후 실행 스크립트(run_dev.sh / run_prod.sh)는 .venv 가 있으면 자동으로 그것을 씁니다.
+#    직접 활성화해서 쓰려면: source .venv/bin/activate
 
 # 2) .env 채우기
 #    ITS_API_KEY=...            국가교통정보센터에서 발급 (https://www.its.go.kr/opendata/opendataList?service=cctv)
@@ -65,8 +73,9 @@ bash scripts/setup.sh
 
 # 3) 모델 가중치
 #    models/weights/yolov8s_seg_vehicle.pt   ← 파인튜닝 결과 best.pt 복사 (.env YOLO_WEIGHTS)
-#    models/weights/sam3.pt                  ← python scripts/download_sam3.py --token hf_xxx
+#    models/weights/sam3.pt                  ← python scripts/download_sam3.py --token hf_xxx  (HF facebook/sam3 승인 필요, 3.4GB)
 #    sam3.pt 가 없으면 SAM2.1 로 자동 대체됩니다 (점/박스 프롬프트만 가능, 텍스트 "road" 프롬프트 불가).
+#    sam3.pt 가 있으면 등록 편집기의 "도로 자동 제안" 이 텍스트 프롬프트 "road" 로 동작합니다 (첫 호출 ~13초 로드, 이후 ~3초).
 ```
 
 ### PostgreSQL
@@ -76,6 +85,18 @@ macOS(Homebrew): `brew install postgresql@17 && brew services start postgresql@1
 (`/opt/homebrew/var/postgresql@17/postgresql.conf` 의 `port = 5433`). 기존 서버를 쓰려면 `DATABASE_URL` 만 바꾸면 됩니다. 테이블은 서버 시작 시 자동 생성됩니다.
 
 ## 실행
+
+**그냥 보고 싶으면 이거 하나:**
+
+```bash
+./start.sh
+```
+
+포트 정리 → (필요하면) 프론트 설치·빌드 → FastAPI 실행 → 브라우저로 http://localhost:8000 열기 까지 한 번에 합니다.
+소스를 고치면서 작업할 때는 `./start.sh dev` (Vite HMR, http://localhost:5173).
+Vercel 페이지를 남들도 보게 하려면 `./start.sh share` (백엔드 + cloudflared 터널). 종료는 모두 `Ctrl+C`.
+
+세부 스크립트:
 
 | 스크립트 | 무엇을 하나 | 언제 쓰나 |
 |---|---|---|
@@ -93,7 +114,7 @@ API 문서: http://localhost:8000/docs
    - Root Directory: `frontend`  (Framework: Vite, Build: `npm run build`, Output: `dist` 자동 인식)
    - Environment Variables: `VITE_API_BASE` = 백엔드 주소
      - 백엔드가 내 PC 에만 있을 때: `http://localhost:8000` — **내 PC 브라우저에서만** 동작합니다 (브라우저는 https 페이지에서도 localhost 호출을 허용). 다른 사람은 볼 수 없습니다.
-     - 다른 사람도 보게 하려면 백엔드를 터널로 노출: `brew install cloudflared && cloudflared tunnel --url http://localhost:8000` → 출력된 `https://xxxx.trycloudflare.com` 을 `VITE_API_BASE` 로. (ngrok 도 동일)
+     - 다른 사람도 보게 하려면 백엔드를 터널로 노출: **`./start.sh share`** — 백엔드와 cloudflared 터널을 같이 띄우고 `https://xxxx.trycloudflare.com` 주소를 찍어줍니다. 그 주소를 `VITE_API_BASE` 에 넣고 Redeploy. (무료 터널은 재시작마다 주소가 바뀌고, 창을 닫으면 끊깁니다)
      - 클라우드로 옮기면 그 주소로 바꾸고 Redeploy.
    - `frontend/vercel.json` 이 SPA 경로(`/cameras/3` 등)를 `index.html` 로 되돌립니다.
 3. **백엔드 CORS** — `*.vercel.app` 은 기본 허용입니다. 커스텀 도메인을 쓰면 `.env` 의 `CORS_ORIGINS` 에 추가하고 재시작.
@@ -136,7 +157,10 @@ API 문서: http://localhost:8000/docs
 | POST | `/api/cameras/{id}/start` · `/stop` · `/analyze` | 워커 제어, 업로드 영상 전체 분석 |
 | GET | `/api/stream/{id}/mjpeg?mode=class|vehicle|road|none` | 실시간 세그멘테이션 MJPEG |
 | GET | `/api/metrics/live` · `/history` · `/summary?by=route|region|section|camera` | 실시간/시계열/집계 |
-| GET/POST | `/api/apps/groups` · `/api/apps/groups/{id}/report` | 응용 그룹 리포트, `/api/apps/presets/han-river` |
+| GET | `/api/metrics/timeline` · `/alerts` · `/heatmap` · `/history.csv` · `/summary.csv` | 지도 타임라인, 혼잡 경보 구간, 요일×시간, CSV |
+| POST/GET | `/api/cameras/{id}/captures` | 현재 프레임+지표 저장/목록 |
+| POST | `/api/system/demo` | 샘플 영상으로 데모 카메라 생성 |
+| GET/POST | `/api/apps/groups` · `/api/apps/groups/{id}/report` · `/daily` | 응용 그룹 리포트, 일별 리포트, `/api/apps/presets/han-river` |
 
 ## 테스트
 
@@ -154,4 +178,6 @@ cd frontend && node e2e/register.mjs http://localhost:8000 ../data/uploads/sampl
   `backend/app/ml/gpu.py` 의 전역 락으로 모든 추론을 직렬화합니다. 카메라가 많으면 `INFER_FPS` 를 낮추세요.
 - **ITS URL**: 테스트 키로는 목록만 오고 영상(HLS)은 401 입니다. 정식 인증키를 `.env` 에 넣어야 실시간 영상이 열립니다.
   cctvType 1(http) 스트림은 https 로 배포한 페이지에서 hls.js 원본 재생이 막힐 수 있으므로 그 경우 4(https) 를 고르세요 (서버측 OpenCV 처리는 영향 없음).
-- 샘플 데이터: `data/uploads/sample_highway.mp4` (AI-Hub 고속도로 CCTV 프레임을 5fps 로 이어 붙인 12초 클립).
+- 샘플 데이터: `data/uploads/sample_highway.mp4` (AI-Hub 고속도로 CCTV 프레임을 5fps 로 이어 붙인 12초 클립). 지도 화면의 "샘플로 시작" 또는 `POST /api/system/demo` 로 데모 카메라를 만듭니다.
+- **HLS 추론 주기**: ITS HLS 는 2초 세그먼트 단위로 프레임이 한꺼번에 도착하므로 시간이 아니라 프레임 개수 기준(`src_fps / INFER_FPS`)으로 추론 프레임을 고릅니다.
+- **ITS 검색 범위**: 좁은 영역도 수백 개가 나오므로 지도 줌 10 이상에서만 자동 검색하고, 중심에서 가까운 400개만 표시합니다.

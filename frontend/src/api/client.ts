@@ -142,6 +142,32 @@ export interface Group {
   members: { id: number; camera_id: number; label: string | null; order: number; camera_name: string | null }[]
 }
 
+export interface AlertEpisode {
+  camera_id: number
+  camera_name: string
+  direction_index: number
+  direction_name: string
+  start: string
+  end: string
+  duration_s: number
+  peak: number
+  mean: number
+  level: string | null
+  n_vehicles: number
+  ongoing: boolean
+}
+
+export interface Capture {
+  name: string
+  ts: string
+  mode: string
+  note: string
+  occupancy: number | null
+  level: string | null
+  n_vehicles: number | null
+  url: string
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -208,6 +234,13 @@ export const api = {
     jobs: (id: number) => req<Job[]>(apiUrl(`/api/cameras/${id}/jobs`)),
     clearSamples: (id: number, source?: string) => req<void>(apiUrl(`/api/cameras/${id}/samples${source ? `?source=${source}` : ''}`), { method: 'DELETE' }),
   },
+  captures: {
+    list: (id: number) => req<Capture[]>(apiUrl(`/api/cameras/${id}/captures`)),
+    create: (id: number, mode: string, note = '') => req<Capture>(apiUrl(`/api/cameras/${id}/captures?mode=${mode}&note=${encodeURIComponent(note)}`), { method: 'POST' }),
+    remove: (id: number, name: string) => req<void>(apiUrl(`/api/cameras/${id}/captures/${name}`), { method: 'DELETE' }),
+    url: (u: string) => `${API_BASE}${u}`,
+  },
+  demo: () => req<{ camera_id: number; created: boolean }>(apiUrl('/api/system/demo'), { method: 'POST' }),
   stream: {
     live: (id: number) => req<LiveState>(apiUrl(`/api/stream/${id}/live`)),
     frameUrl: (id: number, mode: string, hud = true) => `${API_BASE}/api/stream/${id}/frame.jpg?mode=${mode}&hud=${hud}&_=${Date.now()}`,
@@ -215,6 +248,17 @@ export const api = {
   },
   metrics: {
     live: () => req<LiveAll>(apiUrl('/api/metrics/live')),
+    timeline: (minutes: number, bucket: number, direction = 0) =>
+      req<{ bucket: number; buckets: string[]; cameras: Record<string, (number | null)[]>; vehicles: Record<string, (number | null)[]>; thresholds: number[] }>(
+        apiUrl(`/api/metrics/timeline?minutes=${minutes}&bucket=${bucket}&direction=${direction}`),
+      ),
+    alerts: (p: { minutes?: number; camera_id?: number; min_level?: number; min_duration?: number } = {}) =>
+      req<{ threshold: number; count: number; episodes: AlertEpisode[] }>(
+        apiUrl(`/api/metrics/alerts?` + new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])))),
+      ),
+    heatmap: (camera_id: number, days = 7, direction = 0) => req<{ weekdays: string[]; grid: (number | null)[][] }>(apiUrl(`/api/metrics/heatmap?camera_id=${camera_id}&days=${days}&direction=${direction}`)),
+    historyCsvUrl: (camera_id: number, minutes: number, source = 'live') => `${API_BASE}/api/metrics/history.csv?camera_id=${camera_id}&minutes=${minutes}&source=${source}`,
+    summaryCsvUrl: (by: string, minutes: number) => `${API_BASE}/api/metrics/summary.csv?by=${by}&minutes=${minutes}`,
     history: (p: { camera_id: number; direction?: number; minutes?: number; bucket?: number; source?: string }) =>
       req<{ points: HistoryPoint[]; source: string }>(apiUrl(`/api/metrics/history?` + new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])))),
       ),
@@ -228,5 +272,6 @@ export const api = {
     updateGroup: (id: number, b: Record<string, unknown>) => req<Group>(apiUrl(`/api/apps/groups/${id}`), { method: 'PATCH', ...json(b) }),
     deleteGroup: (id: number) => req<void>(apiUrl(`/api/apps/groups/${id}`), { method: 'DELETE' }),
     report: (id: number, minutes: number, bucket = 300) => req<any>(apiUrl(`/api/apps/groups/${id}/report?minutes=${minutes}&bucket=${bucket}`)),
+    daily: (id: number, days = 7) => req<any>(apiUrl(`/api/apps/groups/${id}/daily?days=${days}`)),
   },
 }

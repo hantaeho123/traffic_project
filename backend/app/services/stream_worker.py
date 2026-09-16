@@ -179,13 +179,23 @@ class StreamWorker(threading.Thread):
         self.state.status = "stopped"
 
     def _loop(self, cap: cv2.VideoCapture, seg) -> None:
+        """프레임을 읽어 stride 프레임마다 추론한다.
+
+        HLS 는 세그먼트(보통 2초) 단위로 프레임이 한꺼번에 도착하므로 시간 기준으로 거르면
+        세그먼트당 1번밖에 추론하지 못한다. 그래서 프레임 개수 기준(src_fps / INFER_FPS)으로 거르고,
+        과부하 방지용 최소 간격만 시간으로 둔다.
+        """
         is_file = media.is_file_source(self.source)
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        interval = 1.0 / max(self.settings.infer_fps, 0.1)
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        if not (1.0 <= src_fps <= 120.0):
+            src_fps = 15.0
+        stride = max(1, int(round(src_fps / max(self.settings.infer_fps, 0.1))))
+        min_interval = 0.5 / max(self.settings.infer_fps, 0.1)  # 설정 주기의 절반보다 빠르게는 안 돔
         last_infer = 0.0
         t_wall0 = time.time()
         frame_idx = 0
         consecutive_fail = 0
+        self.state.status = "running"
         while not self._stop.is_set():
             if is_file:
                 ok, frame = cap.read()
@@ -201,6 +211,8 @@ class StreamWorker(threading.Thread):
                 if delay > 0:
                     self._stop.wait(min(delay, 0.5))
                 video_time = frame_idx / src_fps
+                if frame_idx % stride != 0:
+                    continue
             else:
                 ok = cap.grab()
                 if not ok:
@@ -210,15 +222,14 @@ class StreamWorker(threading.Thread):
                     self._stop.wait(0.05)
                     continue
                 consecutive_fail = 0
+                frame_idx += 1
                 video_time = None
-                if time.time() - last_infer < interval:
+                if frame_idx % stride != 0 or time.time() - last_infer < min_interval:
                     continue
                 ok, frame = cap.retrieve()
                 if not ok:
                     continue
             now = time.time()
-            if now - last_infer < interval:
-                continue
             self._process(frame, seg, now, video_time)
             self.state.fps = 1.0 / max(now - last_infer, 1e-3) if last_infer else 0.0
             last_infer = now
