@@ -48,6 +48,8 @@ class Camera(Base):
     frame_height: Mapped[int | None] = mapped_column(Integer)
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 추론 주기(초). None/0 = 실시간(INFER_FPS), 60 = 1분마다 프레임 1장
+    infer_interval_s: Mapped[float | None] = mapped_column(Float)
     meta: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

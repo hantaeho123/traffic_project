@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Camera, Landmark, Map as MapIcon, PlusCircle, Settings2 } from 'lucide-react'
+import { Activity, BarChart3, Camera, Globe2, Landmark, Map as MapIcon, PlusCircle, Settings2 } from 'lucide-react'
 import { Component, type ReactNode } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import { api } from './api/client'
@@ -8,12 +8,14 @@ import AppsPage from './pages/AppsPage'
 import CameraDetailPage from './pages/CameraDetailPage'
 import CamerasPage from './pages/CamerasPage'
 import MapPage from './pages/MapPage'
+import OverviewPage from './pages/OverviewPage'
 import RegisterPage from './pages/RegisterPage'
 import StatsPage from './pages/StatsPage'
 import SystemPage from './pages/SystemPage'
 
 const NAV = [
   { to: '/', label: '지도 관제', icon: MapIcon },
+  { to: '/overview', label: '전국 현황', icon: Globe2 },
   { to: '/cameras', label: '전체 CCTV', icon: Camera },
   { to: '/register', label: 'CCTV 등록', icon: PlusCircle },
   { to: '/stats', label: '점유율 통계', icon: BarChart3 },
@@ -80,6 +82,7 @@ export default function App() {
             <ErrorBoundary>
               <Routes>
                 <Route path="/" element={<MapPage />} />
+                <Route path="/overview" element={<OverviewPage />} />
                 <Route path="/cameras" element={<CamerasPage />} />
                 <Route path="/cameras/:id" element={<CameraDetailPage />} />
                 <Route path="/register" element={<RegisterPage />} />

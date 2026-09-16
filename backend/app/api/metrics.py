@@ -28,6 +28,7 @@ def _cam_brief(c: Camera) -> dict:
         "section": c.section,
         "enabled": c.enabled,
         "has_mask": bool(c.mask_path),
+        "infer_interval_s": c.infer_interval_s,
         "directions": [{"index": d.index, "name": d.name, "color": d.color} for d in c.directions],
     }
 

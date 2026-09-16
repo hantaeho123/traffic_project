@@ -48,6 +48,7 @@ class VehicleSegmenter:
 
         if not Path(weights).exists():
             raise FileNotFoundError(f"YOLO 가중치를 찾을 수 없습니다: {weights}")
+        self.weights = Path(weights)
         self.device = resolve_device(device)
         self.imgsz = imgsz
         self.conf = conf

@@ -9,7 +9,7 @@ import LiveImage from '../components/LiveImage'
 import MaskEditor, { type MaskEditorHandle } from '../components/MaskEditor'
 import TimeSeriesChart from '../components/TimeSeriesChart'
 import { Banner, Card, HeatGrid, Loading, Modal, PageHeader, Segmented, StatCard, useAction } from '../components/ui'
-import { DIRECTION_PALETTE, fmtTime, LEVEL_CLASS, pct } from '../lib/format'
+import { DIRECTION_PALETTE, fmtTime, INTERVAL_OPTIONS, intervalLabel, LEVEL_CLASS, pct } from '../lib/format'
 import { usePolling } from '../lib/usePolling'
 
 const MODES = [{ v: 'class', l: '차종별' }, { v: 'vehicle', l: '차량(단일)' }, { v: 'road', l: '도로만' }, { v: 'none', l: '원본' }]
@@ -79,7 +79,7 @@ export default function CameraDetailPage() {
         {cam.live?.directions?.filter((d) => d.direction_index !== 0).slice(0, 2).map((d) => (
           <StatCard key={d.direction_index} label={d.name} value={pct(d.occupancy)} sub={trend(d.direction_index, d.occupancy)} icon={<span className="dot" style={{ width: 14, height: 14, background: cam.directions.find((x) => x.index === d.direction_index)?.color }} />} tone={LEVEL_CLASS[d.level ?? ''] ?? ''} />
         ))}
-        <StatCard label="검출 차량" value={overall?.n_vehicles ?? '—'} unit="대" sub={cam.live ? `${cam.live.infer_ms} ms/frame · ${cam.live.fps} fps · ${fmtTime(cam.live.ts)}` : '정지'} icon={<CameraIcon />} />
+        <StatCard label="검출 차량 (도로 영역 내)" value={overall?.n_vehicles ?? '—'} unit="대" sub={cam.live ? `${intervalLabel(cam.infer_interval_s)} · ${cam.live.infer_ms} ms · ${fmtTime(cam.live.ts)}` : '정지'} icon={<CameraIcon />} />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(300px, 1fr)' }}>
@@ -105,6 +105,12 @@ export default function CameraDetailPage() {
             <dt>프레임</dt><dd>{cam.frame_width}×{cam.frame_height} · 도로 비율 {pct(cam.meta?.road_coverage as number)}</dd>
             {cam.source_type === 'its' && <><dt>ITS URL</dt><dd>{cam.stream_url_fetched_at ? new Date(cam.stream_url_fetched_at).toLocaleString('ko-KR') : '–'} 발급 (24h 유효, 자동 갱신)</dd></>}
             <dt>등록</dt><dd>{new Date(cam.created_at).toLocaleString('ko-KR')}</dd>
+            <dt>추론 주기</dt>
+            <dd>
+              <select value={cam.infer_interval_s ?? 0} onChange={(e) => run('추론 주기 변경', async () => { await api.cameras.update(cid, { infer_interval_s: +e.target.value || null }); await refresh() }, '추론 주기를 바꿨습니다 (워커 재시작)')} style={{ padding: '3px 24px 3px 8px' }}>
+                {INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+              </select>
+            </dd>
           </dl>
           {cam.source_type === 'upload' && <AnalysisPanel cam={cam} />}
         </Card>

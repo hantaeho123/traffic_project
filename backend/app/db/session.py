@@ -31,3 +31,8 @@ def init_db() -> None:
     from app.db import models  # noqa: F401  (테이블 등록)
 
     Base.metadata.create_all(bind=engine)
+    # 가벼운 마이그레이션: 나중에 추가된 컬럼
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS infer_interval_s DOUBLE PRECISION"))

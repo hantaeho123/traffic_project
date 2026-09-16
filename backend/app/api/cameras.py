@@ -62,6 +62,7 @@ def create_camera(body: CameraCreate, db: Session = Depends(get_db)):
         route=body.route or (its_client.parse_route(body.its_cctv_name) if body.its_cctv_name else None),
         region=body.region,
         section=body.section,
+        infer_interval_s=body.infer_interval_s or None,
         meta=body.meta or {},
         enabled=True,
     )
@@ -98,12 +99,17 @@ def update_camera(camera_id: int, body: CameraUpdate, db: Session = Depends(get_
     data = body.model_dump(exclude_unset=True)
     if "stream_url" in data and data["stream_url"]:
         cam.stream_url_fetched_at = datetime.now(timezone.utc)
+    if "infer_interval_s" in data and not data["infer_interval_s"]:
+        data["infer_interval_s"] = None
+    interval_changed = "infer_interval_s" in data and data["infer_interval_s"] != cam.infer_interval_s
     for k, v in data.items():
         setattr(cam, k, v)
     db.commit()
     db.refresh(cam)
     if cam.enabled is False:
         manager.stop(cam.id)
+    elif interval_changed and manager.is_running(cam.id):
+        manager.restart(cam.id)
     return _to_out(cam)
 
 

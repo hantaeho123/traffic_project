@@ -7,7 +7,7 @@ import LevelBadge from '../components/LevelBadge'
 import LiveImage from '../components/LiveImage'
 import OccupancyBar from '../components/OccupancyBar'
 import { Banner, EmptyState, Loading, Modal, PageHeader, Segmented, useAction } from '../components/ui'
-import { fmtTime, pct } from '../lib/format'
+import { fmtTime, INTERVAL_OPTIONS, intervalLabel, pct } from '../lib/format'
 import { usePolling } from '../lib/usePolling'
 
 type View = 'grid' | 'table'
@@ -82,7 +82,7 @@ export default function CamerasPage() {
               </div>
               <div className="row between" style={{ marginTop: 8 }}>
                 <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[c.route, c.region, c.section].filter(Boolean).join(' · ') || { its: 'ITS 실시간', upload: '업로드 영상', url: '스트림 URL' }[c.source_type]}</span>
-                <span className="muted num">{c.live?.ts ? fmtTime(c.live.ts) : ''}</span>
+                <span className="muted num">{intervalLabel(c.infer_interval_s)}{c.live?.ts ? ` · ${fmtTime(c.live.ts)}` : ''}</span>
               </div>
             </div>
           ))}
@@ -103,7 +103,7 @@ export default function CamerasPage() {
               <thead>
                 <tr>
                   <th><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map((c) => c.id)) : new Set())} /></th>
-                  <th>이름</th><th>소스</th><th>노선 / 지역 / 구간</th><th>방향</th><th>상태</th><th className="num">점유율</th><th className="num">차량</th><th></th>
+                  <th>이름</th><th>소스</th><th>노선 / 지역 / 구간</th><th>방향</th><th>상태</th><th>주기</th><th className="num">점유율</th><th className="num">차량</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -115,6 +115,7 @@ export default function CamerasPage() {
                     <td className="muted">{[c.route, c.region, c.section].filter(Boolean).join(' / ') || '—'}</td>
                     <td>{c.directions.map((d) => <span key={d.index} className="pill" style={{ marginRight: 4 }}><span className="dot" style={{ background: d.color, width: 8, height: 8 }} />{d.name}</span>)}</td>
                     <td>{c.running ? <span className="row" style={{ gap: 6 }}><span className="status-dot ok" />{c.live?.status ?? 'running'}</span> : <span className="row" style={{ gap: 6 }}><span className="status-dot" />정지</span>}</td>
+                    <td className="muted">{intervalLabel(c.infer_interval_s)}</td>
                     <td className="num" style={{ minWidth: 160 }}><OccupancyBar value={c.occupancy} level={c.level} compact /></td>
                     <td className="num">{c.n_vehicles ?? '—'}</td>
                     <td>
@@ -140,7 +141,7 @@ function EditModal({ cam, onClose, onSaved }: { cam: LiveCamera | null; onClose:
   const [f, setF] = useState<Partial<Camera>>({})
   const { run, busy } = useAction()
   const key = cam?.id
-  useMemo(() => { if (cam) setF({ name: cam.name, route: cam.route ?? '', region: cam.region ?? '', section: cam.section ?? '', lon: cam.lon, lat: cam.lat }) }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  useMemo(() => { if (cam) setF({ name: cam.name, route: cam.route ?? '', region: cam.region ?? '', section: cam.section ?? '', lon: cam.lon, lat: cam.lat, infer_interval_s: cam.infer_interval_s ?? 0 }) }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!cam) return null
   return (
     <Modal open title={`편집 — ${cam.name}`} onClose={onClose} width={560}>
@@ -151,10 +152,12 @@ function EditModal({ cam, onClose, onSaved }: { cam: LiveCamera | null; onClose:
         <label>구간</label><input value={f.section ?? ''} onChange={(e) => setF({ ...f, section: e.target.value })} placeholder="예: 신갈JC~수원IC" />
         <label>경도 / 위도</label>
         <div className="row"><input value={f.lon ?? ''} onChange={(e) => setF({ ...f, lon: e.target.value === '' ? null : +e.target.value })} style={{ width: 130 }} /><input value={f.lat ?? ''} onChange={(e) => setF({ ...f, lat: e.target.value === '' ? null : +e.target.value })} style={{ width: 130 }} /></div>
+        <label>추론 주기</label>
+        <select value={f.infer_interval_s ?? 0} onChange={(e) => setF({ ...f, infer_interval_s: +e.target.value })}>{INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>
       </div>
       <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
         <button onClick={onClose}>취소</button>
-        <button className="primary" disabled={!!busy} onClick={() => run('저장', async () => { await api.cameras.update(cam.id, { ...f, route: f.route || null, region: f.region || null, section: f.section || null }); await onSaved() }, '저장했습니다')}>저장</button>
+        <button className="primary" disabled={!!busy} onClick={() => run('저장', async () => { await api.cameras.update(cam.id, { ...f, route: f.route || null, region: f.region || null, section: f.section || null, infer_interval_s: f.infer_interval_s || null }); await onSaved() }, '저장했습니다')}>저장</button>
       </div>
       <div className="muted" style={{ marginTop: 10 }}>현재 점유율 {pct(cam.occupancy)} · 도로 마스크 편집은 상세 페이지에서</div>
     </Modal>

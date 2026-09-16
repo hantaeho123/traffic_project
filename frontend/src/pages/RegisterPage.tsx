@@ -6,7 +6,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { API_BASE, api, imageSrc, type Camera, type Direction, type ItsCctv } from '../api/client'
 import MaskEditor, { type MaskEditorHandle } from '../components/MaskEditor'
 import { Banner, Card, PageHeader, Segmented, Spinner, useToast } from '../components/ui'
-import { DIRECTION_PALETTE } from '../lib/format'
+import { DIRECTION_PALETTE, INTERVAL_OPTIONS } from '../lib/format'
 
 type SourceTab = 'its' | 'upload' | 'url'
 interface Snapshot { snapshot_id: string; width: number; height: number; url: string }
@@ -61,6 +61,7 @@ export default function RegisterPage() {
   const onEditorReady = useCallback((h: MaskEditorHandle) => { editorRef.current = h }, [])
   // ---- 메타 ----
   const [meta, setMeta] = useState({ name: '', route: '', region: '', section: '', lon: '', lat: '' })
+  const [interval, setInterval_] = useState(0)
 
   const preLat = params.get('lat'), preLon = params.get('lon'), preLabel = params.get('label')
   const initialCenter: [number, number] = preLat && preLon ? [+preLat, +preLon] : [37.5, 127.0]
@@ -135,6 +136,7 @@ export default function RegisterPage() {
         name: meta.name, source_type: tab, snapshot_id: snapshot.snapshot_id,
         route: meta.route || null, region: meta.region || null, section: meta.section || null,
         lon: meta.lon ? +meta.lon : null, lat: meta.lat ? +meta.lat : null,
+        infer_interval_s: interval || null,
       }
       if (tab === 'its' && selectedIts) Object.assign(body, { stream_url: selectedIts.url, its_cctv_name: selectedIts.name, its_road_type: selectedIts.road_type, its_cctv_type: cctvType })
       if (tab === 'url') Object.assign(body, { stream_url: urlInput })
@@ -281,6 +283,11 @@ export default function RegisterPage() {
               </div>
               <label>방향</label>
               <div className="row">{directions.map((d) => <span key={d.index} className="pill"><span className="dot" style={{ background: d.color }} />{d.name}</span>)}</div>
+              <label>추론 주기</label>
+              <div className="row">
+                <select value={interval} onChange={(e) => setInterval_(+e.target.value)}>{INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>
+                <span className="muted">실시간은 스트림을 계속 디코딩합니다. 카메라가 많으면 1분마다 등으로 낮추세요 (나중에 변경 가능).</span>
+              </div>
             </div>
             <div className="row" style={{ marginTop: 16 }}>
               <button onClick={() => setStep(2)}>← 도로 영역 수정</button>

@@ -17,6 +17,7 @@ from app.db.models import AnalysisJob, Camera, OccupancySample
 from app.db.session import SessionLocal
 from app.ml.occupancy import compute_occupancy
 from app.ml.registry import get_vehicle_segmenter
+from app.ml.roi import infer_in_roi, roi_from_mask
 from app.ml.vehicle_seg import VEHICLE_CLASSES
 from app.services import media
 
@@ -49,6 +50,7 @@ def _run(job_id: int) -> None:
 
         road = media.load_mask(mask_path)
         seg = get_vehicle_segmenter()
+        roi = None
         cap = media.open_capture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -66,7 +68,10 @@ def _run(job_id: int) -> None:
                 if ok:
                     if road.shape != frame.shape[:2]:
                         road = cv2.resize(road, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
-                    res = seg.infer(frame)
+                        roi = None
+                    if roi is None:
+                        roi = roi_from_mask(road)
+                    res = infer_in_roi(seg, frame, road, roi)
                     metrics = compute_occupancy(res, road, n_dir)
                     sec = int(idx / fps)
                     b = bucket.setdefault(sec, {})

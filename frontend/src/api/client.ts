@@ -83,6 +83,7 @@ export interface LiveState {
   video_time: number | null
   directions: DirectionLive[]
   name?: string
+  interval_s?: number | null
 }
 
 export interface Camera {
@@ -104,6 +105,7 @@ export interface Camera {
   frame_width: number | null
   frame_height: number | null
   enabled: boolean
+  infer_interval_s: number | null
   meta: Record<string, unknown> | null
   created_at: string
   directions: Direction[]
@@ -134,6 +136,7 @@ export interface LiveCamera {
   section: string | null
   enabled: boolean
   has_mask: boolean
+  infer_interval_s: number | null
   directions: Direction[]
   running: boolean
   live: LiveState | null

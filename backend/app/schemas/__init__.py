@@ -39,6 +39,7 @@ class CameraCreate(BaseModel):
     route: str | None = None
     region: str | None = None
     section: str | None = None
+    infer_interval_s: float | None = Field(default=None, ge=0, le=3600)
     meta: dict[str, Any] | None = None
 
 
@@ -51,6 +52,7 @@ class CameraUpdate(BaseModel):
     section: str | None = None
     enabled: bool | None = None
     stream_url: str | None = None
+    infer_interval_s: float | None = Field(default=None, ge=0, le=3600)
     meta: dict[str, Any] | None = None
 
 
@@ -73,6 +75,7 @@ class CameraOut(BaseModel):
     frame_width: int | None
     frame_height: int | None
     enabled: bool
+    infer_interval_s: float | None = None
     meta: dict[str, Any] | None
     created_at: datetime
     directions: list[DirectionOut] = []

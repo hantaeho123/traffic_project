@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     sam_conf: float = 0.3
 
     # ---- 실시간 처리 ----
-    infer_fps: float = 2.0
+    infer_fps: float = 2.0  # '실시간' 모드의 카메라당 초당 추론 횟수
+    roi_crop: bool = True  # 도로 마스크 바운딩 박스만 잘라 추론
+    roi_pad: int = 32
     sample_write_interval: float = 5.0
     stream_jpeg_quality: int = 80
     its_url_ttl_hours: float = 23.0  # ITS URL 은 24h 유효 → 그 전에 갱신

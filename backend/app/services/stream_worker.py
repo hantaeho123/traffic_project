@@ -21,6 +21,7 @@ from app.db.models import Camera, OccupancySample
 from app.db.session import SessionLocal
 from app.ml.occupancy import DirectionMetrics, compute_occupancy
 from app.ml.registry import get_vehicle_segmenter
+from app.ml.roi import Roi, infer_in_roi, roi_from_mask
 from app.ml.render import DIRECTION_COLORS, encode_jpeg, hex_to_bgr, render_overlay
 from app.ml.vehicle_seg import VEHICLE_CLASSES
 from app.services import its_client, media
@@ -75,6 +76,8 @@ class StreamWorker(threading.Thread):
         self.source: str = ""
         self.source_type: str = ""
         self.road_label: np.ndarray | None = None
+        self.roi: Roi | None = None
+        self.interval: float = 0.0  # 초. 0 = 실시간(INFER_FPS)
         self.n_directions: int = 0
         self.direction_names: dict[int, str] = {}
         self.direction_colors: list[tuple[int, int, int]] = list(DIRECTION_COLORS)
@@ -102,8 +105,10 @@ class StreamWorker(threading.Thread):
                 "lat": cam.lat,
                 "fetched_at": cam.stream_url_fetched_at,
             }
+            self.interval = float(cam.infer_interval_s or 0.0)
             if cam.mask_path:
                 self.road_label = media.load_mask(cam.mask_path)
+                self.roi = roi_from_mask(self.road_label, self.settings.roi_pad)
             self.direction_names = {d.index: d.name for d in cam.directions}
             self.direction_colors = [
                 hex_to_bgr(d.color, DIRECTION_COLORS[(d.index - 1) % len(DIRECTION_COLORS)]) for d in cam.directions
@@ -150,7 +155,12 @@ class StreamWorker(threading.Thread):
             self.state.status, self.state.error = "error", str(e)
             log.error("[cam %s] 시작 실패: %s", self.camera_id, e)
             return
-        seg = get_vehicle_segmenter()
+        try:
+            seg = get_vehicle_segmenter()
+        except Exception as e:
+            self.state.status, self.state.error = "error", f"차량 모델 로드 실패: {e}"
+            log.error("[cam %s] %s", self.camera_id, self.state.error)
+            return
         backoff = 2.0
         fails = 0
         while not self._stop.is_set():
@@ -167,7 +177,10 @@ class StreamWorker(threading.Thread):
             backoff, fails = 2.0, 0
             self.state.status, self.state.error = "running", None
             try:
-                self._loop(cap, seg)
+                if self.interval >= 1.0:
+                    self._interval_loop(cap, seg)
+                else:
+                    self._loop(cap, seg)
             except Exception as e:
                 log.exception("[%s] 루프 오류: %s", self.name, e)
                 self.state.status, self.state.error = "reconnecting", str(e)
@@ -234,11 +247,83 @@ class StreamWorker(threading.Thread):
             self.state.fps = 1.0 / max(now - last_infer, 1e-3) if last_infer else 0.0
             last_infer = now
 
-    def _process(self, frame: np.ndarray, seg, now: float, video_time: float | None) -> None:
+    def _interval_loop(self, cap: cv2.VideoCapture, seg) -> None:
+        """주기 모드: interval 초마다 프레임 1장만 추론한다 (GPU 오버헤드 최소화).
+
+        - 파일: 캡처를 열어 둔 채 위치를 건너뛰며 1장씩 읽는다.
+        - 실시간 스트림, 주기 < 60초: 스트림은 열어 둔 채 프레임을 계속 흘려보내고(grab, 디코딩만) 주기마다 1장만 추론.
+          (ITS CDN 은 동시 세션·재접속에 제한이 있어 자주 여닫으면 URL 이 막힌다)
+        - 실시간 스트림, 주기 ≥ 60초: 매 주기마다 새로 열어 최신 프레임 1장을 읽고 닫는다(네트워크·디코딩 상시 부담 없음).
+        """
+        is_file = media.is_file_source(self.source)
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        if not (1.0 <= src_fps <= 120.0):
+            src_fps = 15.0
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) if is_file else 0
+        reopen = (not is_file) and self.interval >= 60.0
+        pos = 0
+        first = True
+        last_infer = 0.0
+        consecutive_fail = 0
+        while not self._stop.is_set():
+            t0 = time.time()
+            frame = None
+            video_time = None
+            if is_file:
+                if total > 0:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, pos % total)
+                ok, frame = cap.read()
+                if not ok:
+                    pos = 0
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, frame = cap.read()
+                video_time = (pos % max(total, 1)) / src_fps
+                pos += int(self.interval * src_fps)
+            elif reopen:
+                if not first:
+                    cap.release()
+                    self._maybe_refresh_its_url()
+                    try:
+                        cap = media.open_capture(self.source)
+                    except Exception as e:
+                        raise RuntimeError(f"스트림 열기 실패: {e}")
+                for _ in range(4):  # 앞쪽 프레임은 버리고 안정된 프레임
+                    ok, f = cap.read()
+                    if ok:
+                        frame = f
+                if frame is None:
+                    raise RuntimeError("프레임을 읽지 못했습니다")
+            else:
+                # 스트림을 흘려보내며(grab) 주기가 되면 1장 retrieve
+                ok = cap.grab()
+                if not ok:
+                    consecutive_fail += 1
+                    if consecutive_fail > 50:
+                        raise RuntimeError("스트림 읽기 실패가 반복됩니다")
+                    self._stop.wait(0.05)
+                    continue
+                consecutive_fail = 0
+                if time.time() - last_infer < self.interval:
+                    continue
+                ok, frame = cap.retrieve()
+                if not ok:
+                    continue
+            first = False
+            if frame is not None:
+                now = time.time()
+                self._process(frame, seg, now, video_time, flush_now=True)
+                self.state.fps = 1.0 / self.interval
+                last_infer = now
+            if is_file or reopen:
+                # 다음 주기까지 대기 (처리 시간 제외)
+                self._stop.wait(max(0.5, self.interval - (time.time() - t0)))
+
+    def _process(self, frame: np.ndarray, seg, now: float, video_time: float | None, flush_now: bool = False) -> None:
         if self.road_label.shape != frame.shape[:2]:
-            road = cv2.resize(self.road_label, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
-            self.road_label = road
-        res = seg.infer(frame)
+            self.road_label = cv2.resize(self.road_label, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+            self.roi = roi_from_mask(self.road_label, self.settings.roi_pad)
+        # 도로 마스크 영역 안에서만 차량 세그멘테이션
+        res = infer_in_roi(seg, frame, self.road_label, self.roi, crop=self.settings.roi_crop)
         metrics = compute_occupancy(res, self.road_label, self.n_directions)
         with self._lock:
             self.state.frame = frame
@@ -249,7 +334,7 @@ class StreamWorker(threading.Thread):
             self.state.infer_ms = res.infer_ms
             self.state.video_time = video_time
         self._accumulate(metrics)
-        if now - self._last_flush >= self.settings.sample_write_interval:
+        if flush_now or now - self._last_flush >= self.settings.sample_write_interval:
             self._flush()
 
     # ---------- DB 집계 ----------
@@ -302,6 +387,7 @@ class StreamWorker(threading.Thread):
         with self._lock:
             j = self.state.metrics_json(self.settings.congestion_thresholds, self.direction_names)
         j["name"] = self.name
+        j["interval_s"] = self.interval or None
         return j
 
     def render_jpeg(self, mode: str = "class", with_hud: bool = True) -> bytes | None:
