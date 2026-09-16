@@ -107,20 +107,43 @@ API 문서: http://localhost:8000/docs
 
 ## 배포: 프론트는 Vercel, 백엔드는 로컬(→ 나중에 클라우드)
 
-프론트와 백엔드가 다른 도메인에 있으므로 **프론트에 백엔드 주소**, **백엔드에 프론트 출처(CORS)** 를 알려주면 됩니다.
+프론트와 백엔드가 다른 도메인에 있으므로 프론트는 **백엔드 주소**를, 백엔드는 **프론트 출처(CORS)** 를 알아야 합니다.
 
-1. **GitHub 푸시** — `.env`, `data/`, `models/weights/*.pt`, `frontend/dist` 는 `.gitignore` 로 제외됩니다 (키·가중치·영상은 올라가지 않음).
-2. **Vercel 프로젝트 생성** — Import 후 설정:
-   - Root Directory: `frontend`  (Framework: Vite, Build: `npm run build`, Output: `dist` 자동 인식)
-   - Environment Variables: `VITE_API_BASE` = 백엔드 주소
-     - 백엔드가 내 PC 에만 있을 때: `http://localhost:8000` — **내 PC 브라우저에서만** 동작합니다 (브라우저는 https 페이지에서도 localhost 호출을 허용). 다른 사람은 볼 수 없습니다.
-     - 다른 사람도 보게 하려면 백엔드를 터널로 노출: **`./start.sh share`** — 백엔드와 cloudflared 터널을 같이 띄우고 `https://xxxx.trycloudflare.com` 주소를 찍어줍니다. 그 주소를 `VITE_API_BASE` 에 넣고 Redeploy. (무료 터널은 재시작마다 주소가 바뀌고, 창을 닫으면 끊깁니다)
-     - 클라우드로 옮기면 그 주소로 바꾸고 Redeploy.
-   - `frontend/vercel.json` 이 SPA 경로(`/cameras/3` 등)를 `index.html` 로 되돌립니다.
-3. **백엔드 CORS** — `*.vercel.app` 은 기본 허용입니다. 커스텀 도메인을 쓰면 `.env` 의 `CORS_ORIGINS` 에 추가하고 재시작.
-4. 로컬에서 백엔드만 실행: `bash scripts/run_prod.sh` (또는 `python backend/run.py`). 프론트를 Vercel 에서 보더라도 로컬 dist 가 함께 서비스되는 것은 문제 없습니다.
+### 백엔드 주소를 한 번만 정하는 방법 — 고정 도메인 + 터널
 
-주의: Vercel(https) 페이지에서 ITS 의 `http://` HLS 원본을 hls.js 로 직접 재생하는 것은 브라우저가 막습니다(혼합 콘텐츠). 세그멘테이션 스트림(MJPEG)은 백엔드를 거치므로 영향이 없고, 원본 재생이 필요하면 등록 시 cctvType **4 (https)** 를 고르세요.
+`VITE_API_BASE` 에는 **백엔드 API 의 공개 주소**(예: `https://xxxx.ngrok-free.app`)를 넣습니다. 이 값을 바꾸고 싶지 않다면
+주소 자체가 바뀌지 않게 만들면 됩니다. ngrok 은 계정당 **고정 도메인 1개를 무료**로 주고, 그 도메인은 기계가 아니라 계정에 묶이므로
+지금은 내 PC 에서, 나중에는 클라우드 VM 에서 같은 명령을 실행해도 **주소가 같습니다**.
+
+```bash
+brew install ngrok
+ngrok config add-authtoken <ngrok 대시보드의 토큰>      # https://dashboard.ngrok.com
+# 대시보드 > Domains 에서 무료 고정 도메인 1개 발급 (예: brave-fox-123.ngrok-free.app)
+ngrok http --url=brave-fox-123.ngrok-free.app 8000       # 백엔드(8000)를 그 도메인으로 공개
+```
+
+- Vercel 환경변수: `VITE_API_BASE=https://brave-fox-123.ngrok-free.app` — **한 번 넣고 끝**.
+- 백엔드를 클라우드로 옮기면 그 서버에서 같은 `ngrok http --url=...` 을 실행하거나, 서버가 고정 IP/도메인을 가지면 DNS 만 그쪽으로 바꿉니다. 프론트는 손대지 않습니다.
+- 도메인을 하나 갖고 있다면(예: Cloudflare 에 등록) `api.내도메인.com` 을 만들어 `cloudflared tunnel` 이름 있는 터널이나 클라우드 서버에 연결하는 것이 가장 깔끔합니다. 원리는 같습니다.
+- 개발 중 내 PC 에서만 볼 때는 터널 없이 `http://localhost:8000` 도 됩니다(https 페이지에서도 localhost 는 허용). 다른 사람은 못 봅니다.
+
+### 환경변수 없이도 되는 대안 — 화면에서 백엔드 주소 지정
+
+프론트는 백엔드 주소를 다음 순서로 정합니다: ① 접속 URL 의 `?api=...` ② 브라우저에 저장된 값(시스템 페이지 > 백엔드 주소) ③ `VITE_API_BASE` ④ 같은 서버의 `/api`.
+따라서 Vercel 환경변수를 아예 비워 두고, 배포된 페이지의 **시스템 > 백엔드 주소**에 한 번 입력해도 됩니다.
+다른 사람에게는 `https://내앱.vercel.app/?api=https://brave-fox-123.ngrok-free.app` 처럼 링크를 주면 그 브라우저에 저장됩니다.
+백엔드에 연결이 안 되면 사이드바 상태 표시가 "백엔드 연결 안 됨 → 주소 설정" 링크로 바뀝니다.
+
+### Vercel 설정
+
+1. GitHub 푸시 — `.venv`, `.env`, `data/`, `models/weights/*.pt`, `frontend/dist` 는 `.gitignore` 로 제외됩니다.
+2. Vercel Import → Root Directory `frontend` (Vite 자동 인식). `frontend/vercel.json` 이 SPA 경로를 `index.html` 로 되돌립니다.
+3. (선택) Environment Variables 에 `VITE_API_BASE` = 위의 고정 도메인.
+4. 백엔드 CORS: `*.vercel.app` 은 기본 허용. 커스텀 도메인은 `.env` 의 `CORS_ORIGINS` 에 추가 후 재시작.
+5. 로컬에서는 `bash scripts/run_prod.sh` 로 백엔드를 띄우고, 다른 터미널에서 `ngrok http --url=... 8000` 을 켜 둡니다.
+
+주의: https 페이지에서 ITS 의 `http://` HLS 원본을 hls.js 로 직접 재생하는 것은 브라우저가 막습니다(혼합 콘텐츠). 세그멘테이션 스트림(MJPEG)은 백엔드를 거치므로 영향이 없고, 원본 재생이 필요하면 등록 시 cctvType **4 (https)** 를 고르세요.
+ngrok 무료 도메인은 브라우저 요청에 경고 페이지를 끼워 넣지만, 프론트가 주소에 `ngrok` 이 포함되면 자동으로 우회 헤더(`ngrok-skip-browser-warning`)를 붙이고 영상/이미지는 fetch 로 받아 표시하므로 별도 조치가 필요 없습니다 (MJPEG 대신 초당 최대 4장 폴링).
 
 나중에 백엔드를 클라우드로 옮길 때 필요한 것: GPU 인스턴스(또는 CPU 로 `INFER_FPS` 낮춤), PostgreSQL(RDS 등)로 `DATABASE_URL` 변경, `data/` 디렉터리 영속 볼륨, `models/weights/` 복사.
 
@@ -174,8 +197,8 @@ cd frontend && node e2e/register.mjs http://localhost:8000 ../data/uploads/sampl
 
 ## 알아둘 점
 
-- **MPS(Apple GPU) 동시 추론 금지**: YOLO 워커와 SAM 요청이 동시에 GPU 를 쓰면 Metal 단언 실패로 프로세스가 죽습니다.
-  `backend/app/ml/gpu.py` 의 전역 락으로 모든 추론을 직렬화합니다. 카메라가 많으면 `INFER_FPS` 를 낮추세요.
+- **MPS(Apple GPU) 는 단일 스레드에서만**: 여러 스레드가 Metal 커맨드 버퍼를 만지면(추론뿐 아니라 결과 텐서의 `.cpu()` 복사까지) 프로세스가 통째로 죽습니다(SIGABRT/SIGSEGV in `arange_range_fill_mps`).
+  `backend/app/ml/gpu.py` 의 `run_gpu()` 가 모델 로딩·추론·텐서→numpy 변환을 **GPU 전용 스레드 1개**에서만 실행합니다. 새 모델 코드를 추가할 때도 텐서를 만지는 부분은 반드시 `run_gpu` 안에 넣으세요. 카메라가 많으면 `INFER_FPS` 를 낮추세요.
 - **ITS URL**: 테스트 키로는 목록만 오고 영상(HLS)은 401 입니다. 정식 인증키를 `.env` 에 넣어야 실시간 영상이 열립니다.
   cctvType 1(http) 스트림은 https 로 배포한 페이지에서 hls.js 원본 재생이 막힐 수 있으므로 그 경우 4(https) 를 고르세요 (서버측 OpenCV 처리는 영향 없음).
 - 샘플 데이터: `data/uploads/sample_highway.mp4` (AI-Hub 고속도로 CCTV 프레임을 5fps 로 이어 붙인 12초 클립). 지도 화면의 "샘플로 시작" 또는 `POST /api/system/demo` 로 데모 카메라를 만듭니다.

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { EXTRA_HEADERS, NEEDS_BYPASS, api } from '../api/client'
 import { Spinner } from './ui'
 
 /** MJPEG 스트림 <img>. 워커가 없으면 서버가 정지 프레임을 준다. 첫 프레임 전까지 스피너 표시. */
@@ -11,9 +11,35 @@ export default function LiveImage({ cameraId, mode, hud = true, maxFps = 8, styl
   useEffect(() => {
     setReady(false)
     setFailed(false)
-    setSrc(api.stream.mjpegUrl(cameraId, mode, hud, maxFps))
+    if (!NEEDS_BYPASS) {
+      setSrc(api.stream.mjpegUrl(cameraId, mode, hud, maxFps))
+      return () => {
+        if (ref.current) ref.current.src = ''
+      }
+    }
+    // 터널 경고 페이지 우회: frame.jpg 를 fetch 로 폴링해 blob 으로 표시
+    let alive = true
+    let last = ''
+    const tick = async () => {
+      try {
+        const r = await fetch(api.stream.frameUrl(cameraId, mode, hud), { headers: EXTRA_HEADERS })
+        if (!alive) return
+        if (r.ok) {
+          const u = URL.createObjectURL(await r.blob())
+          if (last) URL.revokeObjectURL(last)
+          last = u
+          setSrc(u)
+        } else setFailed(true)
+      } catch {
+        if (alive) setFailed(true)
+      }
+      if (alive) timer = window.setTimeout(tick, Math.max(250, 1000 / Math.min(maxFps, 4)))
+    }
+    let timer = window.setTimeout(tick, 0)
     return () => {
-      if (ref.current) ref.current.src = ''
+      alive = false
+      clearTimeout(timer)
+      if (last) URL.revokeObjectURL(last)
     }
   }, [cameraId, mode, hud, maxFps])
   return (

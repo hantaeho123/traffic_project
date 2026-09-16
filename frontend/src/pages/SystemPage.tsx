@@ -1,6 +1,7 @@
-import { Cpu, Database, KeyRound, Play, RadioTower, Settings2, Sparkles } from 'lucide-react'
+import { Cpu, Database, Globe, KeyRound, Play, RadioTower, Settings2, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
+import { useState } from 'react'
+import { API_BASE, API_BASE_SOURCE, api, setApiBase } from '../api/client'
 import { Banner, Card, Loading, PageHeader, useAction } from '../components/ui'
 import { usePolling } from '../lib/usePolling'
 
@@ -8,7 +9,13 @@ export default function SystemPage() {
   const { data, error, setData } = usePolling(() => api.system(), 5000)
   const { data: cams } = usePolling(() => api.cameras.list(), 5000)
   const { run, busy } = useAction()
-  if (error && !data) return <div className="page"><Banner kind="error">백엔드에 연결할 수 없습니다: {error}</Banner></div>
+  if (error && !data)
+    return (
+      <div className="page">
+        <Banner kind="error">백엔드에 연결할 수 없습니다: {error}</Banner>
+        <div style={{ marginTop: 12, maxWidth: 640 }}><ApiBaseCard /></div>
+      </div>
+    )
   if (!data) return <div className="page"><Loading lg /></div>
   const road = data.models.road
   const workers = Object.entries(data.workers) as [string, string][]
@@ -16,6 +23,7 @@ export default function SystemPage() {
     <div className="page">
       <PageHeader title="시스템" description="모델·연동·워커 상태. 설정값은 프로젝트 루트의 .env 로 바꾸고 서버를 재시작합니다." actions={<button className="primary" disabled={!!busy} onClick={() => run('데모 카메라 생성', () => api.demo(), '샘플 카메라를 시작했습니다')}><Sparkles />샘플 카메라 만들기</button>} />
       <div className="grid auto">
+        <ApiBaseCard />
         <Card title="차량 세그멘테이션 (YOLO-seg, 파인튜닝)" icon={<Cpu size={16} />}>
           <dl className="kv">
             <dt>가중치</dt><dd className="mono">{data.models.yolo_weights}</dd>
@@ -78,5 +86,27 @@ export default function SystemPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+
+function ApiBaseCard() {
+  const [v, setV] = useState(API_BASE)
+  const srcLabel = { browser: '브라우저에 저장된 값', env: '빌드 환경변수 VITE_API_BASE', 'same-origin': '같은 서버 (/api)' }[API_BASE_SOURCE]
+  return (
+    <Card title="백엔드 주소" icon={<Globe size={16} />}>
+      <dl className="kv" style={{ marginBottom: 8 }}>
+        <dt>현재</dt><dd className="mono">{API_BASE || '(같은 서버) /api'}</dd>
+        <dt>출처</dt><dd>{srcLabel}</dd>
+      </dl>
+      <div className="row">
+        <input value={v} onChange={(e) => setV(e.target.value)} placeholder="https://xxxx.ngrok-free.app 또는 http://localhost:8000" style={{ flex: 1, minWidth: 220 }} />
+        <button className="primary" onClick={() => setApiBase(v)}>적용</button>
+        {API_BASE_SOURCE === 'browser' && <button onClick={() => setApiBase('')}>초기화</button>}
+      </div>
+      <p className="muted" style={{ marginTop: 8 }}>
+        이 값은 이 브라우저에만 저장됩니다. 다른 사람에게 링크로 알려주려면 <code>?api=백엔드주소</code> 를 붙여 주세요 (한 번 열면 저장됨). 비워 두면 빌드 환경변수 → 같은 서버 순으로 씁니다.
+      </p>
+    </Card>
   )
 }

@@ -1,6 +1,6 @@
 import { Brush, Eraser, Hand, Minus, MousePointerClick, Pentagon, Plus, Redo2, Scissors, Sparkles, SquareDashedMousePointer, Undo2, Wand2, ZoomIn, ZoomOut } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { API_BASE, api, type Direction } from '../api/client'
+import { API_BASE, api, imageSrc, type Direction } from '../api/client'
 import { DIRECTION_PALETTE } from '../lib/format'
 import { Spinner } from './ui'
 
@@ -39,7 +39,7 @@ function hexToRgb(hex: string): [number, number, number] {
 async function decodeMaskPng(b64OrUrl: string, w: number, h: number): Promise<Uint8Array> {
   const img = new Image()
   img.crossOrigin = 'anonymous'
-  img.src = b64OrUrl.startsWith('data:') || b64OrUrl.startsWith('http') ? b64OrUrl : b64OrUrl.startsWith('/') ? API_BASE + b64OrUrl : `data:image/png;base64,${b64OrUrl}`
+  img.src = b64OrUrl.startsWith('data:') ? b64OrUrl : b64OrUrl.startsWith('http') ? await imageSrc(b64OrUrl) : b64OrUrl.startsWith('/') ? await imageSrc(API_BASE + b64OrUrl) : `data:image/png;base64,${b64OrUrl}`
   await img.decode()
   const c = document.createElement('canvas')
   c.width = w
@@ -110,6 +110,8 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
   const [opacity, setOpacity] = useState(0.45)
   const [pending, setPending] = useState<Uint8Array | null>(null)
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
+  const [bgSrc, setBgSrc] = useState('')
+  useEffect(() => { imageSrc(imageUrl.startsWith('/') ? API_BASE + imageUrl : imageUrl).then(setBgSrc).catch(() => setBgSrc('')) }, [imageUrl])
   // 뷰 변환
   const [fit, setFit] = useState(1)
   const [zoom, setZoom] = useState(1)
@@ -489,7 +491,7 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
         onPointerLeave={() => { onPointerUp(); setCursor(null) }}
       >
         <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0', width, height }}>
-          <img src={imageUrl.startsWith('/') ? API_BASE + imageUrl : imageUrl} alt="" width={width} height={height} draggable={false} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
+          <img src={bgSrc} alt="" width={width} height={height} draggable={false} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
           <canvas ref={overlayRef} width={width} height={height} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
           <canvas ref={drawRef} width={width} height={height} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
         </div>

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # MPS 미지원 연산은 CPU 로
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

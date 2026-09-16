@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Camera as CameraIcon, Download, FileVideo, Grid3X3, Images, Minus, Pencil, Play, RefreshCw, Square, Trash2, TrendingUp } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { API_BASE, api, type AlertEpisode, type Camera, type Capture, type Direction, type HistoryPoint, type Job } from '../api/client'
+import { API_BASE, api, imageSrc, type AlertEpisode, type Camera, type Capture, type Direction, type HistoryPoint, type Job } from '../api/client'
 import DirectionPanel from '../components/DirectionPanel'
 import HlsPlayer from '../components/HlsPlayer'
 import LevelBadge from '../components/LevelBadge'
@@ -302,7 +302,7 @@ function CapturesSection({ cid }: { cid: number }) {
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
         {list.map((c) => (
           <div key={c.name} className="card pad-0" style={{ cursor: 'pointer' }} onClick={() => setOpen(c)}>
-            <img src={API_BASE + c.url} alt="" style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} />
+            <BlobImg url={API_BASE + c.url} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }} />
             <div style={{ padding: '6px 8px' }} className="row between">
               <span className="small num">{fmtTime(c.ts)}</span>
               <span className="row" style={{ gap: 4 }}><LevelBadge level={c.level} size="sm" /><span className="muted">{pct(c.occupancy)}</span></span>
@@ -313,7 +313,7 @@ function CapturesSection({ cid }: { cid: number }) {
       <Modal open={!!open} title={open ? `${new Date(open.ts).toLocaleString('ko-KR')} · ${pct(open.occupancy)} ${open.level ?? ''}` : ''} onClose={() => setOpen(null)} width={960}>
         {open && (
           <div className="stack">
-            <img src={API_BASE + open.url} alt="" style={{ width: '100%', borderRadius: 8 }} />
+            <BlobImg url={API_BASE + open.url} style={{ width: '100%', borderRadius: 8 }} />
             <div className="row between">
               <a href={API_BASE + open.url} download className="row small" style={{ gap: 4 }}><Download size={14} />이미지 저장</a>
               <button className="sm danger" onClick={() => run('캡처 삭제', async () => { await api.captures.remove(cid, open.name); setOpen(null); setData(await api.captures.list(cid)) })}><Trash2 />삭제</button>
@@ -323,6 +323,12 @@ function CapturesSection({ cid }: { cid: number }) {
       </Modal>
     </Card>
   )
+}
+
+function BlobImg({ url, style }: { url: string; style?: React.CSSProperties }) {
+  const [src, setSrc] = useState('')
+  useEffect(() => { let u = ''; imageSrc(url).then((s) => { u = s; setSrc(s) }).catch(() => {}); return () => { if (u.startsWith('blob:')) URL.revokeObjectURL(u) } }, [url])
+  return <img src={src} alt="" style={style} />
 }
 
 // DIRECTION_PALETTE 는 방향 색 fallback 용으로 유지

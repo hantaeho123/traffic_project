@@ -1,8 +1,55 @@
 /* 백엔드 REST 클라이언트.
- * - 개발/같은 서버 배포: VITE_API_BASE 비움 → 상대 경로 /api (Vite 가 8000 으로 프록시)
- * - 프론트만 Vercel 등 다른 곳에 배포: VITE_API_BASE=http://localhost:8000 또는 https://<터널/클라우드 주소>
+ * 백엔드 주소(API_BASE) 결정 순서:
+ *   1. URL 쿼리 ?api=https://... (한 번 열면 브라우저에 저장됨)
+ *   2. 브라우저에 저장된 값 (시스템 페이지 > 백엔드 주소)
+ *   3. 빌드 시 환경변수 VITE_API_BASE
+ *   4. 비어 있으면 같은 서버의 /api (개발 프록시 / 단일 서버 배포)
  */
-export const API_BASE: string = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/+$/, '')
+const STORAGE_KEY = 'traffic.api_base'
+function resolveApiBase(): string {
+  let v: string | null = null
+  try {
+    const q = new URLSearchParams(window.location.search).get('api')
+    if (q != null) {
+      v = q
+      localStorage.setItem(STORAGE_KEY, q)
+      const u = new URL(window.location.href)
+      u.searchParams.delete('api')
+      window.history.replaceState({}, '', u.toString())
+    } else v = localStorage.getItem(STORAGE_KEY)
+  } catch {
+    /* localStorage 사용 불가 */
+  }
+  if (v == null || v === '') v = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+  return v.trim().replace(/\/+$/, '')
+}
+export const API_BASE: string = resolveApiBase()
+/** ngrok 무료 도메인은 브라우저 요청에 경고 페이지를 끼워 넣는다. 이 헤더를 붙이면 건너뛴다. */
+export const NEEDS_BYPASS = /ngrok/.test(API_BASE)
+export const EXTRA_HEADERS: Record<string, string> = NEEDS_BYPASS ? { 'ngrok-skip-browser-warning': '1' } : {}
+
+/** <img src> 로 직접 못 쓰는 경우(ngrok 경고 페이지)를 위해 fetch 로 받아 blob URL 로 바꾼다. */
+export async function imageSrc(url: string): Promise<string> {
+  if (!NEEDS_BYPASS) return url
+  const r = await fetch(url, { headers: EXTRA_HEADERS })
+  if (!r.ok) throw new Error(`이미지 요청 실패 ${r.status}`)
+  return URL.createObjectURL(await r.blob())
+}
+export const API_BASE_SOURCE: 'browser' | 'env' | 'same-origin' = (() => {
+  try {
+    const st = localStorage.getItem(STORAGE_KEY)
+    if (st) return 'browser'
+  } catch { /* ignore */ }
+  return (import.meta.env.VITE_API_BASE as string | undefined) ? 'env' : 'same-origin'
+})()
+/** 백엔드 주소를 브라우저에 저장하고 새로고침 (빈 값 = 환경변수/같은 서버로 복귀) */
+export function setApiBase(v: string) {
+  try {
+    if (v.trim()) localStorage.setItem(STORAGE_KEY, v.trim())
+    else localStorage.removeItem(STORAGE_KEY)
+  } catch { /* ignore */ }
+  window.location.reload()
+}
 export const apiUrl = (path: string) => `${API_BASE}${path}`
 
 
@@ -177,7 +224,7 @@ export class ApiError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(path, { headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) }, ...init })
+  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...EXTRA_HEADERS, ...(init?.headers || {}) } })
   if (!r.ok) {
     let msg = r.statusText
     try {
@@ -208,7 +255,7 @@ export const api = {
     upload: async (file: File) => {
       const fd = new FormData()
       fd.append('file', file)
-      const r = await fetch(apiUrl('/api/uploads'), { method: 'POST', body: fd })
+      const r = await fetch(apiUrl('/api/uploads'), { method: 'POST', body: fd, headers: EXTRA_HEADERS })
       if (!r.ok) throw new ApiError(r.status, (await r.json()).detail)
       return (await r.json()) as { kind: string; path: string; filename: string; snapshot_id: string; width: number; height: number; url: string; info: any }
     },

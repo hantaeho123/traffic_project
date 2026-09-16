@@ -44,7 +44,7 @@ function SystemStatus() {
   const workers = data ? Object.keys(data.workers).length : 0
   return (
     <div className="sys">
-      <div className="line"><span className={`status-dot ${error ? 'err' : data ? 'ok' : ''}`} />{error ? '백엔드 연결 안 됨' : data ? `백엔드 정상 · 워커 ${workers}` : '연결 중'}</div>
+      <div className="line"><span className={`status-dot ${error ? 'err' : data ? 'ok' : ''}`} />{error ? <NavLink to="/system">백엔드 연결 안 됨 → 주소 설정</NavLink> : data ? `백엔드 정상 · 워커 ${workers}` : '연결 중'}</div>
       {data && <div className="line"><span className={`status-dot ${data.its_configured ? 'ok' : 'warn'}`} />ITS 키 {data.its_configured ? '설정됨' : '미설정'}</div>}
       {data && <div className="line"><span className={`status-dot ${data.models.road.backend === 'sam3' ? 'ok' : 'warn'}`} />도로 SAM: {data.models.road.backend}</div>}
     </div>

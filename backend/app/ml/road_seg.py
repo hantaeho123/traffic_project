@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from app.ml.device import resolve_device
-from app.ml.gpu import inference
+from app.ml.gpu import run_gpu
 
 log = logging.getLogger(__name__)
 
@@ -95,22 +95,12 @@ class RoadSegmenter:
         h, w = image_bgr.shape[:2]
 
         def _go():
-            with inference(self.device):
-                pred = self._load_semantic()
-                pred.args.conf = conf if conf is not None else self.conf
-                results = pred(source=image_bgr, text=[t.strip() for t in text.split(",") if t.strip()])
-            mask = np.zeros((h, w), dtype=bool)
-            r = results[0]
-            if r.masks is not None and len(r.masks) > 0:
-                m = r.masks.data.cpu().numpy() > 0.5
-                if m.shape[1:] != (h, w):
-                    import cv2
+            pred = self._load_semantic()
+            pred.args.conf = conf if conf is not None else self.conf
+            results = pred(source=image_bgr, text=[t.strip() for t in text.split(",") if t.strip()])
+            return _union(results, h, w)  # 텐서 변환까지 GPU 스레드에서
 
-                    m = np.stack([cv2.resize(x.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0 for x in m])
-                mask = m.any(0)
-            return mask
-
-        return self._run(_go)
+        return self._run(lambda: run_gpu(_go, device=self.device))
 
     def segment_prompt(
         self,
@@ -125,20 +115,19 @@ class RoadSegmenter:
             return np.zeros((h, w), dtype=bool)
 
         def _go():
-            with inference(self.device):
-                sam = self._load_interactive()
-                kwargs = dict(device=self.device, verbose=False, save=False, imgsz=1024)
-                masks_out = np.zeros((h, w), dtype=bool)
-                if points:
-                    # 모든 점을 하나의 객체 프롬프트로 묶어 전달 (positive/negative 혼합)
-                    res = sam.predict(image_bgr, points=[points], labels=[labels or [1] * len(points)], **kwargs)
-                    masks_out |= _union(res, h, w)
-                if boxes:
-                    res = sam.predict(image_bgr, bboxes=boxes, **kwargs)
-                    masks_out |= _union(res, h, w)
-                return masks_out
+            sam = self._load_interactive()
+            kwargs = dict(device=self.device, verbose=False, save=False, imgsz=1024)
+            masks_out = np.zeros((h, w), dtype=bool)
+            if points:
+                # 모든 점을 하나의 객체 프롬프트로 묶어 전달 (positive/negative 혼합)
+                res = sam.predict(image_bgr, points=[points], labels=[labels or [1] * len(points)], **kwargs)
+                masks_out |= _union(res, h, w)
+            if boxes:
+                res = sam.predict(image_bgr, bboxes=boxes, **kwargs)
+                masks_out |= _union(res, h, w)
+            return masks_out
 
-        return self._run(_go)
+        return self._run(lambda: run_gpu(_go, device=self.device))
 
 
 def _union(results, h: int, w: int) -> np.ndarray:

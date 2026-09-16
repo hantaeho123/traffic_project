@@ -3,7 +3,7 @@ import { Check, FileVideo, Link2, MapPin, RadioTower, Save, Search, Upload } fro
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { API_BASE, api, type Camera, type Direction, type ItsCctv } from '../api/client'
+import { API_BASE, api, imageSrc, type Camera, type Direction, type ItsCctv } from '../api/client'
 import MaskEditor, { type MaskEditorHandle } from '../components/MaskEditor'
 import { Banner, Card, PageHeader, Segmented, Spinner, useToast } from '../components/ui'
 import { DIRECTION_PALETTE } from '../lib/format'
@@ -308,7 +308,7 @@ function MaskPreview({ imageUrl, width, height, handle, directions }: { imageUrl
     const ctx = cv.getContext('2d')!
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.src = imageUrl.startsWith('/') ? API_BASE + imageUrl : imageUrl
+    imageSrc(imageUrl.startsWith('/') ? API_BASE + imageUrl : imageUrl).then((u) => (img.src = u)).catch(() => {})
     img.onload = () => {
       ctx.drawImage(img, 0, 0, width, height)
       const id = ctx.getImageData(0, 0, width, height)

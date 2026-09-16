@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from app.ml.device import resolve_device
-from app.ml.gpu import inference
+from app.ml.gpu import run_gpu
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class VehicleSegmenter:
         # 워밍업
         try:
             dummy = np.zeros((360, 640, 3), dtype=np.uint8)
-            self.infer(dummy)
+            self.infer(dummy)  # run_gpu 를 통해 GPU 스레드에서 워밍업
         except Exception as e:  # pragma: no cover
             log.warning("YOLO 워밍업 실패(무시): %s", e)
 
@@ -66,7 +66,8 @@ class VehicleSegmenter:
 
         h, w = frame_bgr.shape[:2]
         t0 = time.perf_counter()
-        with inference(self.device):
+
+        def _run():
             results = self.model.predict(
                 frame_bgr,
                 imgsz=self.imgsz,
@@ -75,19 +76,27 @@ class VehicleSegmenter:
                 retina_masks=True,
                 verbose=False,
             )
-        r = results[0]
+            r = results[0]
+            if r.masks is None or len(r.masks) == 0:
+                return None
+            # 텐서 → numpy 변환까지 GPU 스레드 안에서 끝낸다
+            return (
+                r.masks.data.cpu().numpy(),
+                r.boxes.cls.cpu().numpy().astype(int),
+                r.boxes.conf.cpu().numpy(),
+                r.boxes.xyxy.cpu().numpy(),
+            )
+
+        out = run_gpu(_run, device=self.device)
         label_map = np.zeros((h, w), dtype=np.uint8)
         instances: list[VehicleInstance] = []
-        if r.masks is not None and len(r.masks) > 0:
-            masks = r.masks.data.cpu().numpy()  # (N, h', w') float
+        if out is not None:
+            masks, clss, confs, boxes = out
             if masks.shape[1:] != (h, w):
                 import cv2
 
                 masks = np.stack([cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST) for m in masks])
             masks = masks > 0.5
-            clss = r.boxes.cls.cpu().numpy().astype(int)
-            confs = r.boxes.conf.cpu().numpy()
-            boxes = r.boxes.xyxy.cpu().numpy()
             areas = masks.reshape(masks.shape[0], -1).sum(1)
             # 큰 객체부터 칠하고 작은 객체를 위에 덮어 겹침 시 작은 객체 우선
             order = np.argsort(-areas)
