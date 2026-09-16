@@ -1,0 +1,112 @@
+"""파인튜닝된 YOLO-seg 로 차량(car/bus/truck) 인스턴스 마스크를 뽑는다.
+
+출력은 프레임 크기의 라벨맵(uint8): 0=배경, 1=car, 2=bus, 3=truck.
+여러 워커 스레드가 하나의 모델을 공유하므로 추론은 락으로 직렬화한다.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+from app.ml.device import resolve_device
+from app.ml.gpu import inference
+
+log = logging.getLogger(__name__)
+
+VEHICLE_CLASSES = ["car", "bus", "truck"]
+CLASS_TO_LABEL = {name: i + 1 for i, name in enumerate(VEHICLE_CLASSES)}  # car=1 bus=2 truck=3
+
+
+@dataclass
+class VehicleInstance:
+    cls: str
+    conf: float
+    area: int
+    cx: float
+    cy: float
+    box: tuple[float, float, float, float]
+
+
+@dataclass
+class VehicleResult:
+    label_map: np.ndarray  # (H, W) uint8
+    instances: list[VehicleInstance] = field(default_factory=list)
+    infer_ms: float = 0.0
+
+    @property
+    def vehicle_mask(self) -> np.ndarray:
+        return self.label_map > 0
+
+
+class VehicleSegmenter:
+    def __init__(self, weights: Path, device: str = "auto", imgsz: int = 960, conf: float = 0.25):
+        from ultralytics import YOLO
+
+        if not Path(weights).exists():
+            raise FileNotFoundError(f"YOLO 가중치를 찾을 수 없습니다: {weights}")
+        self.device = resolve_device(device)
+        self.imgsz = imgsz
+        self.conf = conf
+        self.model = YOLO(str(weights))
+        self.names = {int(k): v for k, v in self.model.names.items()}
+        log.info("YOLO 로드 완료: %s (device=%s, classes=%s)", weights, self.device, self.names)
+        # 워밍업
+        try:
+            dummy = np.zeros((360, 640, 3), dtype=np.uint8)
+            self.infer(dummy)
+        except Exception as e:  # pragma: no cover
+            log.warning("YOLO 워밍업 실패(무시): %s", e)
+
+    def infer(self, frame_bgr: np.ndarray) -> VehicleResult:
+        import time
+
+        h, w = frame_bgr.shape[:2]
+        t0 = time.perf_counter()
+        with inference(self.device):
+            results = self.model.predict(
+                frame_bgr,
+                imgsz=self.imgsz,
+                conf=self.conf,
+                device=self.device,
+                retina_masks=True,
+                verbose=False,
+            )
+        r = results[0]
+        label_map = np.zeros((h, w), dtype=np.uint8)
+        instances: list[VehicleInstance] = []
+        if r.masks is not None and len(r.masks) > 0:
+            masks = r.masks.data.cpu().numpy()  # (N, h', w') float
+            if masks.shape[1:] != (h, w):
+                import cv2
+
+                masks = np.stack([cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST) for m in masks])
+            masks = masks > 0.5
+            clss = r.boxes.cls.cpu().numpy().astype(int)
+            confs = r.boxes.conf.cpu().numpy()
+            boxes = r.boxes.xyxy.cpu().numpy()
+            areas = masks.reshape(masks.shape[0], -1).sum(1)
+            # 큰 객체부터 칠하고 작은 객체를 위에 덮어 겹침 시 작은 객체 우선
+            order = np.argsort(-areas)
+            for i in order:
+                name = self.names.get(int(clss[i]), "car")
+                label = CLASS_TO_LABEL.get(name, 1)
+                m = masks[i]
+                if areas[i] == 0:
+                    continue
+                label_map[m] = label
+                ys, xs = np.nonzero(m)
+                instances.append(
+                    VehicleInstance(
+                        cls=name,
+                        conf=float(confs[i]),
+                        area=int(areas[i]),
+                        cx=float(xs.mean()),
+                        cy=float(ys.mean()),
+                        box=tuple(float(v) for v in boxes[i]),
+                    )
+                )
+        return VehicleResult(label_map=label_map, instances=instances, infer_ms=(time.perf_counter() - t0) * 1000)
