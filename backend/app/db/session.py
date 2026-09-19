@@ -36,3 +36,10 @@ def init_db() -> None:
 
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS infer_interval_s DOUBLE PRECISION"))
+        for col, typ in (("road", "VARCHAR(100)"), ("heading_deg", "DOUBLE PRECISION"), ("lat", "DOUBLE PRECISION"), ("lon", "DOUBLE PRECISION")):
+            conn.execute(text(f"ALTER TABLE directions ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        # 주기가 비어 있는 카메라는 기본 주기로 (실시간은 0 으로 명시 저장)
+        conn.execute(
+            text("UPDATE cameras SET infer_interval_s = :d WHERE infer_interval_s IS NULL"),
+            {"d": settings.default_infer_interval_s},
+        )

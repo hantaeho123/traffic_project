@@ -1,12 +1,13 @@
 import L from 'leaflet'
-import { Check, FileVideo, Link2, MapPin, RadioTower, Save, Search, Upload } from 'lucide-react'
+import { Check, Compass, FileVideo, Link2, MapPin, RadioTower, Save, Search, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { API_BASE, api, imageSrc, type Camera, type Direction, type ItsCctv } from '../api/client'
+import DirectionMapEditor from '../components/DirectionMapEditor'
 import MaskEditor, { type MaskEditorHandle } from '../components/MaskEditor'
 import { Banner, Card, PageHeader, Segmented, Spinner, useToast } from '../components/ui'
-import { DIRECTION_PALETTE, INTERVAL_OPTIONS } from '../lib/format'
+import { DEFAULT_INTERVAL, DIRECTION_PALETTE, INTERVAL_OPTIONS } from '../lib/format'
 
 type SourceTab = 'its' | 'upload' | 'url'
 interface Snapshot { snapshot_id: string; width: number; height: number; url: string }
@@ -61,7 +62,7 @@ export default function RegisterPage() {
   const onEditorReady = useCallback((h: MaskEditorHandle) => { editorRef.current = h }, [])
   // ---- 메타 ----
   const [meta, setMeta] = useState({ name: '', route: '', region: '', section: '', lon: '', lat: '' })
-  const [interval, setInterval_] = useState(0)
+  const [interval, setInterval_] = useState(DEFAULT_INTERVAL)
 
   const preLat = params.get('lat'), preLon = params.get('lon'), preLabel = params.get('label')
   const initialCenter: [number, number] = preLat && preLon ? [+preLat, +preLon] : [37.5, 127.0]
@@ -131,19 +132,25 @@ export default function RegisterPage() {
     if (!Object.values(st).some((v) => v > 0)) return setErr('도로 영역이 비어 있습니다. 2단계로 돌아가 도로를 지정하세요.')
     setErr(null)
     setBusy('카메라 생성 중…')
+    // 카메라 좌표가 비어 있으면 방향 화살표 위치의 평균으로
+    const anchors = directions.filter((d) => d.lat != null && d.lon != null)
+    if ((!meta.lat || !meta.lon) && anchors.length) {
+      meta.lat = String(anchors.reduce((a, d) => a + d.lat!, 0) / anchors.length)
+      meta.lon = String(anchors.reduce((a, d) => a + d.lon!, 0) / anchors.length)
+    }
     try {
       const body: Record<string, unknown> = {
         name: meta.name, source_type: tab, snapshot_id: snapshot.snapshot_id,
         route: meta.route || null, region: meta.region || null, section: meta.section || null,
         lon: meta.lon ? +meta.lon : null, lat: meta.lat ? +meta.lat : null,
-        infer_interval_s: interval || null,
+        infer_interval_s: interval,
       }
       if (tab === 'its' && selectedIts) Object.assign(body, { stream_url: selectedIts.url, its_cctv_name: selectedIts.name, its_road_type: selectedIts.road_type, its_cctv_type: cctvType })
       if (tab === 'url') Object.assign(body, { stream_url: urlInput })
       if (tab === 'upload' && upload) Object.assign(body, { video_path: upload.path, meta: { upload_kind: upload.kind, filename: upload.filename } })
       const cam = await api.cameras.create(body)
       setBusy('도로 마스크 저장 중…')
-      await api.cameras.putMask(cam.id, editorRef.current.exportPng(), directions.map((d) => ({ index: d.index, name: d.name, color: d.color })))
+      await api.cameras.putMask(cam.id, editorRef.current.exportPng(), directions)
       if (!(tab === 'upload' && upload?.kind === 'image')) { setBusy('모니터링 시작 중…'); await api.cameras.start(cam.id) }
       toast('ok', `"${cam.name}" 등록 완료`)
       nav(`/cameras/${cam.id}`)
@@ -268,6 +275,7 @@ export default function RegisterPage() {
       )}
 
       {step === 3 && snapshot && (
+        <div className="stack">
         <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) 360px' }}>
           <Card title="정보 입력" icon={<Save size={16} />}>
             <div className="form">
@@ -286,7 +294,7 @@ export default function RegisterPage() {
               <label>추론 주기</label>
               <div className="row">
                 <select value={interval} onChange={(e) => setInterval_(+e.target.value)}>{INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>
-                <span className="muted">실시간은 스트림을 계속 디코딩합니다. 카메라가 많으면 1분마다 등으로 낮추세요 (나중에 변경 가능).</span>
+                <span className="muted">기본 10초마다 1장. 실시간은 GPU 를 계속 쓰므로 카메라가 많으면 부담이 큽니다 (나중에 변경 가능).</span>
               </div>
             </div>
             <div className="row" style={{ marginTop: 16 }}>
@@ -300,6 +308,10 @@ export default function RegisterPage() {
             <div className="muted" style={{ marginTop: 8 }}>
               {tab === 'its' ? `ITS 실시간 · ${selectedIts?.name ?? ''}` : tab === 'upload' ? `업로드 · ${upload?.filename ?? ''}` : `URL · ${urlInput}`}
             </div>
+          </Card>
+        </div>
+          <Card title="방향 · 도로 · 지도 표시" icon={<Compass size={16} />} actions={<span className="muted">선택 사항 · 나중에 상세 페이지에서도 지정 가능</span>}>
+            <DirectionMapEditor directions={directions} onChange={setDirections} cameraLat={meta.lat ? +meta.lat : null} cameraLon={meta.lon ? +meta.lon : null} />
           </Card>
         </div>
       )}

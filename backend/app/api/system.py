@@ -24,6 +24,7 @@ def status():
         "levels": CONGESTION_LEVELS,
         "vehicle_classes": VEHICLE_CLASSES,
         "infer_fps": s.infer_fps,
+        "default_infer_interval_s": s.default_infer_interval_s,
         "models": model_status(),
         "workers": {cid: w.state.status for cid, w in manager._workers.items() if w.is_alive()},
     }
@@ -60,6 +61,7 @@ def create_demo(db: Session = Depends(get_db)):
         region="전북 정읍",
         section="태인 졸음쉼터",
         meta={"demo": True, "note": "샘플 영상(반복 재생). AI-Hub 고속도로 CCTV 프레임"},
+        infer_interval_s=get_settings().default_infer_interval_s,
         enabled=True,
     )
     db.add(cam)

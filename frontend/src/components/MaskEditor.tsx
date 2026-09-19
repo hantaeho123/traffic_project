@@ -351,7 +351,7 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
     labelRef.current = cur
     rerender()
   }
-  const addDirection = () => { const idx = directions.length + 1; if (idx > 6) return; onDirectionsChange([...directions, { index: idx, name: `방향 ${idx}`, color: DIRECTION_PALETTE[(idx - 1) % DIRECTION_PALETTE.length] }]); setCurrent(idx) }
+  const addDirection = () => { const idx = directions.length + 1; if (idx > 8) return; onDirectionsChange([...directions, { index: idx, name: `방향 ${idx}`, color: DIRECTION_PALETTE[(idx - 1) % DIRECTION_PALETTE.length] }]); setCurrent(idx) }
   const removeDirection = () => { if (directions.length <= 1) return; const idx = directions.length; pushUndo(); const lab = labelRef.current; for (let i = 0; i < lab.length; i++) if (lab[i] === idx) lab[i] = 0; onDirectionsChange(directions.slice(0, -1)); setCurrent(Math.min(current, idx - 1)); rerender() }
 
   // 단축키
@@ -364,7 +364,7 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
       if (TOOL_KEYS[k]) setTool(TOOL_KEYS[k])
       else if (k === '[') setBrush((b) => Math.max(4, b - 6))
       else if (k === ']') setBrush((b) => Math.min(200, b + 6))
-      else if (/^[1-6]$/.test(k) && directions.some((d) => d.index === +k)) setCurrent(+k)
+      else if (/^[1-8]$/.test(k) && directions.some((d) => d.index === +k)) setCurrent(+k)
       else if (k === 'enter') { if (pending) applyPending(); else if (tool === 'polygon' && poly.length >= 3) applyPolygon(false); else if (tool === 'split' && split.length >= 2) applySplit(); else if (tool === 'sam-point' && points.length) runSam('point'); else if (tool === 'sam-box' && box) runSam('box') }
       else if (k === 'escape') { setPending(null); setPoly([]); setSplit([]); setPoints([]); setBox(null) }
     }
@@ -474,7 +474,7 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
             <span className="muted num">{(((st[d.index] || 0) / total) * 100).toFixed(1)}%</span>
           </div>
         ))}
-        <button className="sm icon" onClick={addDirection} disabled={directions.length >= 6} title="방향 추가"><Plus /></button>
+        <button className="sm icon" onClick={addDirection} disabled={directions.length >= 8} title="방향 추가"><Plus /></button>
         <button className="sm icon" onClick={removeDirection} disabled={directions.length <= 1} title="마지막 방향 삭제"><Minus /></button>
         <span className="muted" style={{ marginLeft: 'auto' }}>도로 {(coverage * 100).toFixed(1)}% · {width}×{height}</span>
       </div>

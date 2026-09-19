@@ -7,7 +7,7 @@ import LevelBadge from '../components/LevelBadge'
 import LiveImage from '../components/LiveImage'
 import OccupancyBar from '../components/OccupancyBar'
 import { Banner, EmptyState, Loading, Modal, PageHeader, Segmented, useAction } from '../components/ui'
-import { fmtTime, INTERVAL_OPTIONS, intervalLabel, pct } from '../lib/format'
+import { DEFAULT_INTERVAL, fmtTime, INTERVAL_OPTIONS, intervalLabel, pct } from '../lib/format'
 import { usePolling } from '../lib/usePolling'
 
 type View = 'grid' | 'table'
@@ -141,7 +141,7 @@ function EditModal({ cam, onClose, onSaved }: { cam: LiveCamera | null; onClose:
   const [f, setF] = useState<Partial<Camera>>({})
   const { run, busy } = useAction()
   const key = cam?.id
-  useMemo(() => { if (cam) setF({ name: cam.name, route: cam.route ?? '', region: cam.region ?? '', section: cam.section ?? '', lon: cam.lon, lat: cam.lat, infer_interval_s: cam.infer_interval_s ?? 0 }) }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  useMemo(() => { if (cam) setF({ name: cam.name, route: cam.route ?? '', region: cam.region ?? '', section: cam.section ?? '', lon: cam.lon, lat: cam.lat, infer_interval_s: cam.infer_interval_s ?? DEFAULT_INTERVAL }) }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!cam) return null
   return (
     <Modal open title={`편집 — ${cam.name}`} onClose={onClose} width={560}>
@@ -153,11 +153,11 @@ function EditModal({ cam, onClose, onSaved }: { cam: LiveCamera | null; onClose:
         <label>경도 / 위도</label>
         <div className="row"><input value={f.lon ?? ''} onChange={(e) => setF({ ...f, lon: e.target.value === '' ? null : +e.target.value })} style={{ width: 130 }} /><input value={f.lat ?? ''} onChange={(e) => setF({ ...f, lat: e.target.value === '' ? null : +e.target.value })} style={{ width: 130 }} /></div>
         <label>추론 주기</label>
-        <select value={f.infer_interval_s ?? 0} onChange={(e) => setF({ ...f, infer_interval_s: +e.target.value })}>{INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>
+        <select value={f.infer_interval_s ?? DEFAULT_INTERVAL} onChange={(e) => setF({ ...f, infer_interval_s: +e.target.value })}>{INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>
       </div>
       <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
         <button onClick={onClose}>취소</button>
-        <button className="primary" disabled={!!busy} onClick={() => run('저장', async () => { await api.cameras.update(cam.id, { ...f, route: f.route || null, region: f.region || null, section: f.section || null, infer_interval_s: f.infer_interval_s || null }); await onSaved() }, '저장했습니다')}>저장</button>
+        <button className="primary" disabled={!!busy} onClick={() => run('저장', async () => { await api.cameras.update(cam.id, { ...f, route: f.route || null, region: f.region || null, section: f.section || null, infer_interval_s: f.infer_interval_s ?? DEFAULT_INTERVAL }); await onSaved() }, '저장했습니다')}>저장</button>
       </div>
       <div className="muted" style={{ marginTop: 10 }}>현재 점유율 {pct(cam.occupancy)} · 도로 마스크 편집은 상세 페이지에서</div>
     </Modal>

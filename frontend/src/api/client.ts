@@ -58,6 +58,10 @@ export interface Direction {
   index: number
   name: string
   color: string
+  road?: string | null // 소속 도로 (한 CCTV 에 도로가 여러 개일 때)
+  heading_deg?: number | null // 진행 방향 (북=0, 시계방향)
+  lat?: number | null // 지도 화살표 위치
+  lon?: number | null
 }
 
 export interface DirectionLive {
@@ -70,6 +74,7 @@ export interface DirectionLive {
   counts: Record<string, number>
   class_px: Record<string, number>
   level: string | null
+  road?: string | null
 }
 
 export interface LiveState {
@@ -275,6 +280,7 @@ export const api = {
     create: (b: Record<string, unknown>) => req<Camera>(apiUrl('/api/cameras'), { method: 'POST', ...json(b) }),
     update: (id: number, b: Record<string, unknown>) => req<Camera>(apiUrl(`/api/cameras/${id}`), { method: 'PATCH', ...json(b) }),
     remove: (id: number) => req<void>(apiUrl(`/api/cameras/${id}`), { method: 'DELETE' }),
+    putDirections: (id: number, directions: Direction[]) => req<Camera>(apiUrl(`/api/cameras/${id}/directions`), { method: 'PUT', ...json(directions) }),
     putMask: (id: number, mask_png_base64: string, directions: Direction[]) =>
       req<Camera>(apiUrl(`/api/cameras/${id}/mask`), { method: 'PUT', ...json({ mask_png_base64, directions }) }),
     start: (id: number) => req<Camera>(apiUrl(`/api/cameras/${id}/start`), { method: 'POST' }),

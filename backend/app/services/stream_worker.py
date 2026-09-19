@@ -80,6 +80,7 @@ class StreamWorker(threading.Thread):
         self.interval: float = 0.0  # 초. 0 = 실시간(INFER_FPS)
         self.n_directions: int = 0
         self.direction_names: dict[int, str] = {}
+        self.direction_roads: dict[int, str | None] = {}
         self.direction_colors: list[tuple[int, int, int]] = list(DIRECTION_COLORS)
         self.name = ""
         self._cam_meta: dict = {}
@@ -105,11 +106,13 @@ class StreamWorker(threading.Thread):
                 "lat": cam.lat,
                 "fetched_at": cam.stream_url_fetched_at,
             }
-            self.interval = float(cam.infer_interval_s or 0.0)
+            iv = cam.infer_interval_s
+            self.interval = float(self.settings.default_infer_interval_s if iv is None else iv)  # 0 = 실시간
             if cam.mask_path:
                 self.road_label = media.load_mask(cam.mask_path)
                 self.roi = roi_from_mask(self.road_label, self.settings.roi_pad)
             self.direction_names = {d.index: d.name for d in cam.directions}
+            self.direction_roads = {d.index: d.road for d in cam.directions}
             self.direction_colors = [
                 hex_to_bgr(d.color, DIRECTION_COLORS[(d.index - 1) % len(DIRECTION_COLORS)]) for d in cam.directions
             ] or list(DIRECTION_COLORS)
@@ -386,6 +389,8 @@ class StreamWorker(threading.Thread):
     def latest_json(self) -> dict:
         with self._lock:
             j = self.state.metrics_json(self.settings.congestion_thresholds, self.direction_names)
+        for d in j["directions"]:
+            d["road"] = self.direction_roads.get(d["direction_index"])
         j["name"] = self.name
         j["interval_s"] = self.interval or None
         return j

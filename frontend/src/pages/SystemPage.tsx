@@ -29,7 +29,8 @@ export default function SystemPage() {
             <dt>가중치</dt><dd className="mono">{data.models.yolo_weights}</dd>
             <dt>상태</dt><dd>{data.models.yolo_loaded ? <span className="ok">로드됨 · {data.models.yolo_device}</span> : <span className="muted">첫 추론 시 로드</span>}</dd>
             <dt>클래스</dt><dd>{(data.models.yolo_classes ?? data.vehicle_classes).join(', ')}</dd>
-            <dt>추론 주기</dt><dd>{data.infer_fps} fps / 카메라 (INFER_FPS)</dd>
+            <dt>기본 추론 주기</dt><dd>{data.default_infer_interval_s ? `${data.default_infer_interval_s}초마다 1장` : '실시간'} (DEFAULT_INFER_INTERVAL_S)</dd>
+            <dt>실시간 모드</dt><dd>{data.infer_fps} fps / 카메라 (INFER_FPS)</dd>
           </dl>
         </Card>
         <Card title="도로 세그멘테이션 (등록 시 1회)" icon={<Cpu size={16} />}>

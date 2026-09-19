@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.db.models import AnalysisJob, Camera, Direction, OccupancySample
 from app.db.session import get_db
 from app.ml.render import DIRECTION_COLORS, encode_jpeg, hex_to_bgr, render_overlay
-from app.schemas import CameraCreate, CameraOut, CameraUpdate, JobOut, MaskUpdate
+from app.schemas import CameraCreate, CameraOut, CameraUpdate, DirectionIn, JobOut, MaskUpdate
 from app.services import its_client, media, video_jobs
 from app.services.worker_manager import manager
 from app.utils.images import b64_to_array
@@ -62,7 +62,7 @@ def create_camera(body: CameraCreate, db: Session = Depends(get_db)):
         route=body.route or (its_client.parse_route(body.its_cctv_name) if body.its_cctv_name else None),
         region=body.region,
         section=body.section,
-        infer_interval_s=body.infer_interval_s or None,
+        infer_interval_s=body.infer_interval_s if body.infer_interval_s is not None else get_settings().default_infer_interval_s,
         meta=body.meta or {},
         enabled=True,
     )
@@ -99,8 +99,8 @@ def update_camera(camera_id: int, body: CameraUpdate, db: Session = Depends(get_
     data = body.model_dump(exclude_unset=True)
     if "stream_url" in data and data["stream_url"]:
         cam.stream_url_fetched_at = datetime.now(timezone.utc)
-    if "infer_interval_s" in data and not data["infer_interval_s"]:
-        data["infer_interval_s"] = None
+    if "infer_interval_s" in data and data["infer_interval_s"] is None:
+        data["infer_interval_s"] = get_settings().default_infer_interval_s
     interval_changed = "infer_interval_s" in data and data["infer_interval_s"] != cam.infer_interval_s
     for k, v in data.items():
         setattr(cam, k, v)
@@ -193,13 +193,40 @@ def put_mask(camera_id: int, body: MaskUpdate, db: Session = Depends(get_db)):
     cam.directions.clear()
     db.flush()
     for d in body.directions:
-        cam.directions.append(Direction(index=d.index, name=d.name, color=d.color))
+        cam.directions.append(Direction(**_dir_fields(d)))
     stats = {str(i): int((label == i).sum()) for i in idx}
     cam.meta = dict(cam.meta or {}, road_px=stats, road_coverage=float((label > 0).mean()))
     db.commit()
     db.refresh(cam)
     if manager.is_running(cam.id):
         manager.restart(cam.id)
+    return _to_out(cam)
+
+
+def _dir_fields(d: DirectionIn) -> dict:
+    return dict(index=d.index, name=d.name, color=d.color, road=(d.road or None), heading_deg=d.heading_deg, lat=d.lat, lon=d.lon)
+
+
+@router.put("/{camera_id}/directions", response_model=CameraOut)
+def put_directions(camera_id: int, body: list[DirectionIn], db: Session = Depends(get_db)):
+    """방향 메타데이터(이름·색·도로·진행 각도·지도 위치)만 수정. 마스크 라벨 번호는 그대로여야 한다."""
+    cam = get_camera_or_404(db, camera_id)
+    existing = {d.index: d for d in cam.directions}
+    if sorted(d.index for d in body) != sorted(existing):
+        raise HTTPException(400, "방향 번호가 마스크와 다릅니다. 방향 추가/삭제는 마스크 편집에서 하세요.")
+    for d in body:
+        row = existing[d.index]
+        for k, v in _dir_fields(d).items():
+            setattr(row, k, v)
+    # 카메라 좌표가 없고 화살표 위치가 있으면 그 평균을 카메라 좌표로
+    pts = [(d.lat, d.lon) for d in body if d.lat is not None and d.lon is not None]
+    if (cam.lat is None or cam.lon is None) and pts:
+        cam.lat = sum(p[0] for p in pts) / len(pts)
+        cam.lon = sum(p[1] for p in pts) / len(pts)
+    db.commit()
+    db.refresh(cam)
+    if manager.is_running(cam.id):
+        manager.restart(cam.id)  # HUD/방향 이름 반영
     return _to_out(cam)
 
 

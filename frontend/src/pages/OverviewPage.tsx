@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { MapContainer, Marker, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type LiveCamera } from '../api/client'
+import DirectionArrows, { allHeading, hasHeading, ZoomWatcher, type DirValue } from '../components/DirectionArrows'
 import LevelBadge from '../components/LevelBadge'
 import { Banner, EmptyState, Loading, Segmented } from '../components/ui'
 import { LEVELS, levelColor, levelOf, pct } from '../lib/format'
@@ -18,7 +19,7 @@ type Period = 0 | 15 | 60 | 1440
 type Group = 'camera' | 'route' | 'region'
 type Metric = 'occupancy' | 'vehicles'
 
-interface Point { key: string; name: string; lat: number; lon: number; value: number | null; vehicles: number | null; level: string | null; n: number; ids: number[]; dirs?: { name: string; value: number | null; level: string | null }[] }
+interface Point { key: string; name: string; lat: number; lon: number; value: number | null; vehicles: number | null; level: string | null; n: number; ids: number[]; dirs?: { index: number; name: string; value: number | null; level: string | null; vehicles?: number | null }[] }
 
 function badgeIcon(p: Point, metric: Metric, big: boolean, split: boolean) {
   const color = levelColor(p.level)
@@ -49,6 +50,8 @@ export default function OverviewPage() {
   const [metric, setMetric] = useState<Metric>('occupancy')
   const [split, setSplit] = useState(true)
   const [levelFilter, setLevelFilter] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(7)
+  const ARROW_ZOOM = 11
   const { data: live, error } = usePolling(() => api.metrics.live(), period === 0 ? 5000 : 30000)
   const { data: summ } = usePolling(() => (period ? api.metrics.summary('camera', period) : Promise.resolve(null)), 30000, [period])
   const thresholds = live?.thresholds ?? [0.08, 0.15, 0.25]
@@ -57,12 +60,12 @@ export default function OverviewPage() {
     const cams = (live?.cameras ?? []).filter((c) => c.lat != null && c.lon != null)
     const valOf = (c: LiveCamera): { v: number | null; veh: number | null; dirs: Point['dirs'] } => {
       if (period === 0) {
-        const dirs = c.live?.directions?.filter((d) => d.direction_index !== 0).map((d) => ({ name: d.name, value: d.occupancy, level: d.level })) ?? []
+        const dirs = c.live?.directions?.filter((d) => d.direction_index !== 0).map((d) => ({ index: d.direction_index, name: d.name, value: d.occupancy, level: d.level, vehicles: d.n_vehicles })) ?? []
         return { v: c.occupancy, veh: c.n_vehicles, dirs }
       }
       const pc = summ?.groups?.flatMap((g: any) => g.cameras).find((x: any) => x.id === c.id)
       if (!pc?.overall) return { v: null, veh: null, dirs: [] }
-      return { v: pc.overall.occupancy, veh: pc.overall.n_vehicles, dirs: pc.directions.map((d: any) => ({ name: d.name, value: d.occupancy, level: d.level })) }
+      return { v: pc.overall.occupancy, veh: pc.overall.n_vehicles, dirs: pc.directions.map((d: any) => ({ index: d.direction_index, name: d.name, value: d.occupancy, level: d.level, vehicles: d.n_vehicles })) }
     }
     if (group === 'camera')
       return cams.map((c) => { const { v, veh, dirs } = valOf(c); return { key: String(c.id), name: c.name, lat: c.lat!, lon: c.lon!, value: v, vehicles: veh, level: levelOf(v, thresholds), n: 1, ids: [c.id], dirs } })
@@ -106,14 +109,31 @@ export default function OverviewPage() {
           <MapContainer center={[36.3, 127.8]} zoom={7} style={{ height: '100%' }}>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <FitOnce points={fitPts} />
-            {shown.map((p) => (
+            <ZoomWatcher onZoom={setZoom} />
+            {shown.map((p) => {
+              const cam = group === 'camera' ? live.cameras.find((c) => c.id === p.ids[0]) : undefined
+              if (cam && zoom >= ARROW_ZOOM && hasHeading(cam)) {
+                const dv: Record<number, DirValue> = {}
+                cam.directions.forEach((d) => {
+                  const x = p.dirs?.find((y) => y.index === d.index)
+                  dv[d.index] = x ? { value: x.value, level: x.level, vehicles: x.vehicles } : { value: p.value, level: p.level, vehicles: null }
+                })
+                return (
+                  <span key={p.key}>
+                    <DirectionArrows cam={cam} values={dv} metric={metric} onClick={() => nav(`/cameras/${cam.id}`)} />
+                    {!allHeading(cam) && <Marker position={[p.lat, p.lon]} icon={badgeIcon(p, metric, false, false)} eventHandlers={{ click: () => nav(`/cameras/${cam.id}`) }} />}
+                  </span>
+                )
+              }
+              return (
               <Marker key={p.key} position={[p.lat, p.lon]} icon={badgeIcon(p, metric, group !== 'camera', split)} zIndexOffset={Math.round((p.value ?? 0) * 1000)} eventHandlers={{ click: () => (p.ids.length === 1 ? nav(`/cameras/${p.ids[0]}`) : undefined) }}>
                 <Tooltip direction="top" offset={[0, -14]}>
                   <b>{p.name}</b>{p.n > 1 ? ` (${p.n}대 평균)` : ''}<br />점유율 {pct(p.value)} · {p.level ?? '–'} · 차량 {p.vehicles == null ? '–' : Math.round(p.vehicles)}대
                   {p.dirs?.length ? <><br />{p.dirs.map((d) => `${d.name} ${pct(d.value)}`).join(' / ')}</> : null}
                 </Tooltip>
               </Marker>
-            ))}
+              )
+            })}
           </MapContainer>
           <div className="map-overlay" style={{ top: 10, left: 10 }}>
             <div className="legend" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
@@ -124,6 +144,7 @@ export default function OverviewPage() {
                 </span>
               ))}
               <span className="muted">숫자 = {metric === 'occupancy' ? '점유율(%)' : '차량 수'}{split ? ', 아래 작은 숫자 = 방향별' : ''}</span>
+              <span className="muted">{zoom >= ARROW_ZOOM ? '확대: 방향별 화살표 (우측통행)' : `줌 ${ARROW_ZOOM} 이상이면 방향별 화살표`}</span>
             </div>
           </div>
         </div>

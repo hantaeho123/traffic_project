@@ -29,7 +29,10 @@ def _cam_brief(c: Camera) -> dict:
         "enabled": c.enabled,
         "has_mask": bool(c.mask_path),
         "infer_interval_s": c.infer_interval_s,
-        "directions": [{"index": d.index, "name": d.name, "color": d.color} for d in c.directions],
+        "directions": [
+            {"index": d.index, "name": d.name, "color": d.color, "road": d.road, "heading_deg": d.heading_deg, "lat": d.lat, "lon": d.lon}
+            for d in c.directions
+        ],
     }
 
 
@@ -140,7 +143,8 @@ def summary(
         .all()
     )
     cams = {c.id: c for c in db.query(Camera).all()}
-    dir_names = {(d.camera_id, d.index): d.name for d in db.query(Direction).all()}
+    dir_rows = {(d.camera_id, d.index): d for d in db.query(Direction).all()}
+    dir_names = {k: d.name for k, d in dir_rows.items()}
     per_cam: dict[int, dict] = {}
     for cid, d, occ, mx, nv, n in rows:
         c = cams.get(cid)
@@ -153,6 +157,8 @@ def summary(
         item = {
             "direction_index": d,
             "name": "전체" if d == 0 else dir_names.get((cid, d), f"방향 {d}"),
+            "road": None if d == 0 else getattr(dir_rows.get((cid, d)), "road", None),
+            "heading_deg": None if d == 0 else getattr(dir_rows.get((cid, d)), "heading_deg", None),
             "occupancy": float(occ),
             "max": float(mx),
             "n_vehicles": float(nv or 0),

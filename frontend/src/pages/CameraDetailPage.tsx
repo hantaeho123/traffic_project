@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Camera as CameraIcon, Download, FileVideo, Grid3X3, Images, Minus, Pencil, Play, RefreshCw, Square, Trash2, TrendingUp } from 'lucide-react'
+import { AlertTriangle, ArrowDownRight, Compass, ArrowUpRight, Camera as CameraIcon, Download, FileVideo, Grid3X3, Images, Minus, Pencil, Play, RefreshCw, Square, Trash2, TrendingUp } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { API_BASE, api, imageSrc, type AlertEpisode, type Camera, type Capture, type Direction, type HistoryPoint, type Job } from '../api/client'
@@ -6,10 +6,11 @@ import DirectionPanel from '../components/DirectionPanel'
 import HlsPlayer from '../components/HlsPlayer'
 import LevelBadge from '../components/LevelBadge'
 import LiveImage from '../components/LiveImage'
+import DirectionMapEditor from '../components/DirectionMapEditor'
 import MaskEditor, { type MaskEditorHandle } from '../components/MaskEditor'
 import TimeSeriesChart from '../components/TimeSeriesChart'
 import { Banner, Card, HeatGrid, Loading, Modal, PageHeader, Segmented, StatCard, useAction } from '../components/ui'
-import { DIRECTION_PALETTE, fmtTime, INTERVAL_OPTIONS, intervalLabel, LEVEL_CLASS, pct } from '../lib/format'
+import { DEFAULT_INTERVAL, DIRECTION_PALETTE, fmtTime, INTERVAL_OPTIONS, intervalLabel, LEVEL_CLASS, pct } from '../lib/format'
 import { usePolling } from '../lib/usePolling'
 
 const MODES = [{ v: 'class', l: '차종별' }, { v: 'vehicle', l: '차량(단일)' }, { v: 'road', l: '도로만' }, { v: 'none', l: '원본' }]
@@ -23,6 +24,7 @@ export default function CameraDetailPage() {
   const [hud, setHud] = useState(true)
   const [showOriginal, setShowOriginal] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [editingDirs, setEditingDirs] = useState(false)
   const [thresholds, setThresholds] = useState<number[]>([0.08, 0.15, 0.25])
   const [recent, setRecent] = useState<Record<number, number> | null>(null) // 최근 15분 방향별 평균
   const { run, busy } = useAction()
@@ -67,6 +69,7 @@ export default function CameraDetailPage() {
             <button onClick={() => run(cam.running ? '정지' : '시작', async () => { await (cam.running ? api.cameras.stop(cid) : api.cameras.start(cid)); await refresh() })} disabled={!cam.mask_path || !!busy}>{cam.running ? <><Square />모니터링 정지</> : <><Play />모니터링 시작</>}</button>
             <button onClick={() => run('스냅샷 갱신', async () => { await api.cameras.refreshSnapshot(cid); await refresh() }, '스냅샷을 갱신했습니다')} disabled={!!busy}><RefreshCw />스냅샷 갱신</button>
             <button className={editing ? 'active' : ''} onClick={() => setEditing(!editing)}><Pencil />도로 마스크 편집</button>
+            <button className={editingDirs ? 'active' : ''} onClick={() => setEditingDirs(!editingDirs)} disabled={!cam.directions.length}><Compass />방향 · 지도 표시</button>
             <button className="danger" onClick={() => { if (confirm('이 CCTV 와 모든 기록을 삭제할까요?')) run('삭제', () => api.cameras.remove(cid)).then(() => nav('/cameras')) }}><Trash2 />삭제</button>
           </>
         }
@@ -107,7 +110,7 @@ export default function CameraDetailPage() {
             <dt>등록</dt><dd>{new Date(cam.created_at).toLocaleString('ko-KR')}</dd>
             <dt>추론 주기</dt>
             <dd>
-              <select value={cam.infer_interval_s ?? 0} onChange={(e) => run('추론 주기 변경', async () => { await api.cameras.update(cid, { infer_interval_s: +e.target.value || null }); await refresh() }, '추론 주기를 바꿨습니다 (워커 재시작)')} style={{ padding: '3px 24px 3px 8px' }}>
+              <select value={cam.infer_interval_s ?? DEFAULT_INTERVAL} onChange={(e) => run('추론 주기 변경', async () => { await api.cameras.update(cid, { infer_interval_s: +e.target.value }); await refresh() }, '추론 주기를 바꿨습니다 (워커 재시작)')} style={{ padding: '3px 24px 3px 8px' }}>
                 {INTERVAL_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
               </select>
             </dd>
@@ -119,6 +122,12 @@ export default function CameraDetailPage() {
       {editing && (
         <Card title="도로 마스크 편집" style={{ marginTop: 12 }}>
           <MaskEditSection cam={cam} onSaved={() => { setEditing(false); refresh() }} />
+        </Card>
+      )}
+
+      {(editingDirs || (cam.directions.length > 0 && cam.directions.every((d) => d.heading_deg == null) && !editing)) && (
+        <Card title="방향 · 도로 · 지도 표시" icon={<Compass size={16} />} style={{ marginTop: 12 }} actions={!editingDirs ? <span className="muted">진행 방향이 아직 지정되지 않아 지도에 점으로만 표시됩니다</span> : undefined}>
+          <DirectionsSection cam={cam} onSaved={() => { setEditingDirs(false); refresh() }} />
         </Card>
       )}
 
@@ -134,8 +143,22 @@ export default function CameraDetailPage() {
   )
 }
 
+function DirectionsSection({ cam, onSaved }: { cam: Camera; onSaved: () => void }) {
+  const [directions, setDirections] = useState<Direction[]>(cam.directions.map((d) => ({ ...d })))
+  const { run, busy } = useAction()
+  return (
+    <div className="stack">
+      <DirectionMapEditor directions={directions} onChange={setDirections} cameraLat={cam.lat} cameraLon={cam.lon} previewUrl={`${API_BASE}/api/cameras/${cam.id}/preview.jpg`} />
+      <div className="row">
+        <button className="primary" disabled={!!busy} onClick={() => run('방향 저장', async () => { await api.cameras.putDirections(cam.id, directions); onSaved() }, '방향 정보를 저장했습니다')}>방향 저장</button>
+        <span className="muted">마스크 라벨(칠한 픽셀)은 그대로이고 이름·도로·지도 방향만 바뀝니다.</span>
+      </div>
+    </div>
+  )
+}
+
 function MaskEditSection({ cam, onSaved }: { cam: Camera; onSaved: () => void }) {
-  const [directions, setDirections] = useState<Direction[]>(cam.directions.map((d) => ({ index: d.index, name: d.name, color: d.color })))
+  const [directions, setDirections] = useState<Direction[]>(cam.directions.map((d) => ({ ...d })))
   const ref = useRef<MaskEditorHandle | null>(null)
   const onReady = useCallback((h: MaskEditorHandle) => { ref.current = h }, [])
   const { run, busy } = useAction()

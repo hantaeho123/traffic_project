@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, Marker, TileLayer, Tooltip, useMap } from 'react-leaflet'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type LiveCamera } from '../api/client'
+import DirectionArrows, { allHeading, hasHeading, ZoomWatcher, type DirValue } from '../components/DirectionArrows'
 import DirectionPanel from '../components/DirectionPanel'
 import LevelBadge from '../components/LevelBadge'
 import LiveImage from '../components/LiveImage'
@@ -41,6 +42,8 @@ export default function MapPage() {
   const nav = useNavigate()
   const { data, error } = usePolling(() => api.metrics.live(), 2000)
   const [selected, setSelected] = useState<number | null>(null)
+  const [zoom, setZoom] = useState(7)
+  const ARROW_ZOOM = 12
   const [showClasses, setShowClasses] = useState(false)
   const [q, setQ] = useState('')
   const [route, setRoute] = useState('')
@@ -137,12 +140,25 @@ export default function MapPage() {
           <MapContainer center={DEFAULT_CENTER} zoom={7} style={{ height: '100%', minHeight: 420 }}>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <FitOnce points={points} />
+            <ZoomWatcher onZoom={setZoom} />
             {withPos.map((c) => {
               const v = valueOf(c)
+              const arrows = zoom >= ARROW_ZOOM && hasHeading(c)
+              // 방향별 값: 실시간이면 방향별, 타임라인 재생 중이면 전체 값으로
+              const dv: Record<number, DirValue> = {}
+              c.directions.forEach((d) => {
+                const ld = tlIdx == null ? c.live?.directions?.find((x) => x.direction_index === d.index) : undefined
+                dv[d.index] = ld ? { value: ld.occupancy, level: ld.level, vehicles: ld.n_vehicles } : { value: v.occ, level: v.level }
+              })
               return (
-                <Marker key={c.id} position={[c.lat!, c.lon!]} icon={markerIcon(v.level, c.running, c.id === selected)} eventHandlers={{ click: () => setSelected(c.id) }}>
-                  <Tooltip direction="top"><b>{c.name}</b> · {pct(v.occ)} {v.level ?? ''}</Tooltip>
-                </Marker>
+                <span key={c.id}>
+                  {arrows && <DirectionArrows cam={c} values={dv} selected={c.id === selected} dim={!c.running} onClick={() => setSelected(c.id)} />}
+                  {(!arrows || !allHeading(c)) && (
+                    <Marker position={[c.lat!, c.lon!]} icon={markerIcon(v.level, c.running, c.id === selected)} eventHandlers={{ click: () => setSelected(c.id) }}>
+                      <Tooltip direction="top"><b>{c.name}</b> · {pct(v.occ)} {v.level ?? ''}{zoom < ARROW_ZOOM && hasHeading(c) ? ' · 확대하면 방향별 화살표' : ''}</Tooltip>
+                    </Marker>
+                  )}
+                </span>
               )
             })}
           </MapContainer>
@@ -158,6 +174,7 @@ export default function MapPage() {
               </select>
               <label className="check small"><input type="checkbox" checked={onlyRunning} onChange={(e) => setOnlyRunning(e.target.checked)} />모니터링 중만</label>
             </div>
+            <div className="muted small">{zoom >= ARROW_ZOOM ? '화살표 = 방향별 진행 방향 (우측통행, 색 = 혼잡 단계)' : `줌 ${ARROW_ZOOM} 이상 확대하면 방향별 화살표로 표시`}</div>
             <div className="legend">
               {LEVELS.map((l, i) => (
                 <span key={l} className={`pill clickable ${levelFilter === l ? 'on' : ''}`} onClick={() => setLevelFilter(levelFilter === l ? null : l)}>

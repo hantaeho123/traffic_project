@@ -69,6 +69,12 @@ class Direction(Base):
     index: Mapped[int] = mapped_column(Integer)  # 1..N (마스크 라벨값)
     name: Mapped[str] = mapped_column(String(100))
     color: Mapped[str] = mapped_column(String(16), default="#2a78d6")
+    # 한 CCTV 에 도로가 여러 개일 수 있다 (본선/램프, 교차 도로). 같은 road 끼리 묶어 보여준다.
+    road: Mapped[str | None] = mapped_column(String(100))
+    # 지도 표시: 진행 방향 각도(북=0, 시계방향, 도) 와 화살표 위치(없으면 카메라 좌표)
+    heading_deg: Mapped[float | None] = mapped_column(Float)
+    lat: Mapped[float | None] = mapped_column(Float)
+    lon: Mapped[float | None] = mapped_column(Float)
 
     camera: Mapped[Camera] = relationship(back_populates="directions")
 
