@@ -27,6 +27,46 @@ def hex_to_bgr(hex_color: str | None, fallback: tuple[int, int, int]) -> tuple[i
     return (b, g, r)
 
 
+class RoadLayer:
+    """도로 마스크로 미리 만들어 두는 오버레이 재료(색 레이어·윤곽선).
+
+    마스크는 거의 바뀌지 않으므로 한 번 만들어 두면 프레임마다 방향별 마스크를 다시
+    만들고 윤곽선을 다시 찾는 비용을 없앨 수 있다.
+    """
+
+    def __init__(self, road_label: np.ndarray, colors: list[tuple[int, int, int]] | None = None):
+        colors = colors or DIRECTION_COLORS
+        n = int(road_label.max()) if road_label.size else 0
+        palette = np.zeros((n + 1, 3), np.uint8)
+        for d in range(1, n + 1):
+            palette[d] = colors[(d - 1) % len(colors)]
+        self.shape = road_label.shape
+        # 도로 바깥은 어차피 칠할 것이 없으므로 마스크 바운딩 박스만 재료로 들고 있는다.
+        ys, xs = np.nonzero(road_label)
+        h, w = road_label.shape
+        self.box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1) if len(ys) else (0, 0, w, h)
+        x0, y0, x1, y1 = self.box
+        win = road_label[y0:y1, x0:x1]
+        self.color = palette[win]
+        self.mask = win > 0
+        self.contours = [
+            (cv2.findContours((road_label == d).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], colors[(d - 1) % len(colors)])
+            for d in range(1, n + 1)
+        ]
+
+
+def _blend_masked(out: np.ndarray, layer: np.ndarray, mask: np.ndarray, alpha: float) -> None:
+    """mask 인 픽셀에만 layer 를 alpha 로 섞는다 (out 을 제자리에서 수정)."""
+    blended = cv2.addWeighted(out, 1.0 - alpha, layer, alpha, 0)
+    np.copyto(out, blended, where=mask[:, :, None])
+
+
+_VEHICLE_PALETTES = {
+    "class": np.array([(0, 0, 0)] + [CLASS_COLORS[c] for c in VEHICLE_CLASSES], np.uint8),
+    "vehicle": np.array([(0, 0, 0)] + [VEHICLE_COLOR] * len(VEHICLE_CLASSES), np.uint8),
+}
+
+
 def render_overlay(
     frame: np.ndarray,
     vehicle_label: np.ndarray | None,
@@ -36,34 +76,27 @@ def render_overlay(
     road_alpha: float = 0.22,
     vehicle_alpha: float = 0.55,
     hud: list[str] | None = None,
+    road_layer: RoadLayer | None = None,
 ) -> np.ndarray:
     """mode: 'class'(차종별 색) | 'vehicle'(단일 색) | 'road'(도로만) | 'none'."""
     out = frame.copy()
-    if road_label is not None and mode != "none":
-        colors = direction_colors or DIRECTION_COLORS
-        overlay = out.copy()
-        n = int(road_label.max()) if road_label.size else 0
-        for d in range(1, n + 1):
-            m = road_label == d
-            if m.any():
-                overlay[m] = colors[(d - 1) % len(colors)]
-        cv2.addWeighted(overlay, road_alpha, out, 1 - road_alpha, 0, out)
-        # 방향 경계선
-        for d in range(1, n + 1):
-            m = (road_label == d).astype(np.uint8)
-            cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(out, cnts, -1, colors[(d - 1) % len(colors)], 2)
+    layer = road_layer
+    if layer is None and road_label is not None and mode != "none":
+        layer = RoadLayer(road_label, direction_colors)
+    if layer is not None and layer.shape != frame.shape[:2]:
+        layer = None
+    if layer is not None and mode != "none":
+        x0, y0, x1, y1 = layer.box
+        _blend_masked(out[y0:y1, x0:x1], layer.color, layer.mask, road_alpha)
+        for cnts, color in layer.contours:  # 방향 경계선
+            cv2.drawContours(out, cnts, -1, color, 2)
 
     if vehicle_label is not None and mode in ("class", "vehicle"):
-        overlay = out.copy()
-        if mode == "class":
-            for i, c in enumerate(VEHICLE_CLASSES):
-                m = vehicle_label == i + 1
-                if m.any():
-                    overlay[m] = CLASS_COLORS[c]
-        else:
-            overlay[vehicle_label > 0] = VEHICLE_COLOR
-        cv2.addWeighted(overlay, vehicle_alpha, out, 1 - vehicle_alpha, 0, out)
+        palette = _VEHICLE_PALETTES[mode]
+        # 차량 라벨은 도로 마스크 밖이 이미 0 이므로 도로 바운딩 박스 안만 칠하면 된다.
+        x0, y0, x1, y1 = layer.box if layer is not None else (0, 0, frame.shape[1], frame.shape[0])
+        veh = np.minimum(vehicle_label[y0:y1, x0:x1], len(VEHICLE_CLASSES))
+        _blend_masked(out[y0:y1, x0:x1], palette[veh], veh > 0, vehicle_alpha)
 
     if hud:
         y = 28

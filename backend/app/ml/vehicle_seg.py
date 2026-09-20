@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 VEHICLE_CLASSES = ["car", "bus", "truck"]
 CLASS_TO_LABEL = {name: i + 1 for i, name in enumerate(VEHICLE_CLASSES)}  # car=1 bus=2 truck=3
+_BOX_PAD = 2  # 마스크가 박스를 살짝 넘칠 때를 대비한 여유 (px)
 
 
 @dataclass
@@ -97,26 +98,34 @@ class VehicleSegmenter:
                 import cv2
 
                 masks = np.stack([cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST) for m in masks])
-            masks = masks > 0.5
-            areas = masks.reshape(masks.shape[0], -1).sum(1)
-            # 큰 객체부터 칠하고 작은 객체를 위에 덮어 겹침 시 작은 객체 우선
-            order = np.argsort(-areas)
-            for i in order:
-                name = self.names.get(int(clss[i]), "car")
-                label = CLASS_TO_LABEL.get(name, 1)
-                m = masks[i]
-                if areas[i] == 0:
+            # 마스크는 자기 박스 안에만 존재한다(ultralytics 가 박스로 자른다).
+            # 그래서 인스턴스마다 프레임 전체(H×W)를 훑지 않고 박스 영역만 다룬다.
+            crops = []  # (area, x0, y0, sub_mask, label, conf, box)
+            for i in range(len(masks)):
+                bx = boxes[i]
+                x0, y0 = max(0, int(bx[0]) - _BOX_PAD), max(0, int(bx[1]) - _BOX_PAD)
+                x1, y1 = min(w, int(bx[2]) + 1 + _BOX_PAD), min(h, int(bx[3]) + 1 + _BOX_PAD)
+                if x1 <= x0 or y1 <= y0:
                     continue
-                label_map[m] = label
-                ys, xs = np.nonzero(m)
+                sub = masks[i][y0:y1, x0:x1] > 0.5
+                area = int(sub.sum())
+                if area == 0:
+                    continue
+                name = self.names.get(int(clss[i]), "car")
+                crops.append((area, x0, y0, sub, name, float(confs[i]), tuple(float(v) for v in bx)))
+            # 큰 객체부터 칠하고 작은 객체를 위에 덮어 겹침 시 작은 객체 우선
+            for area, x0, y0, sub, name, conf, box in sorted(crops, key=lambda c: -c[0]):
+                view = label_map[y0 : y0 + sub.shape[0], x0 : x0 + sub.shape[1]]
+                view[sub] = CLASS_TO_LABEL.get(name, 1)
+                ys, xs = np.nonzero(sub)
                 instances.append(
                     VehicleInstance(
                         cls=name,
-                        conf=float(confs[i]),
-                        area=int(areas[i]),
-                        cx=float(xs.mean()),
-                        cy=float(ys.mean()),
-                        box=tuple(float(v) for v in boxes[i]),
+                        conf=conf,
+                        area=area,
+                        cx=float(xs.mean()) + x0,
+                        cy=float(ys.mean()) + y0,
+                        box=box,
                     )
                 )
         return VehicleResult(label_map=label_map, instances=instances, infer_ms=(time.perf_counter() - t0) * 1000)

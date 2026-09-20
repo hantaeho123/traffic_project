@@ -38,3 +38,36 @@ def test_empty_road_gives_zero():
     vlabel = np.ones((10, 10), np.uint8)
     res = compute_occupancy(VehicleResult(label_map=vlabel), road, 0)
     assert res[0].occupancy == 0.0 and res[0].road_px == 0
+
+
+def test_roi_gives_same_result():
+    """도로 바운딩 박스만 세도 전체를 센 것과 결과가 같다."""
+    from app.ml.roi import roi_from_mask
+
+    road = _road()
+    vlabel = np.zeros_like(road)
+    vlabel[60:70, 10:30] = 1
+    vlabel[60:80, 150:160] = 3
+    res = VehicleResult(label_map=vlabel, instances=[])
+    full = compute_occupancy(res, road, 2)
+    windowed = compute_occupancy(res, road, 2, roi_from_mask(road, 4))
+    for d in full:
+        assert (full[d].occupancy, full[d].vehicle_px, full[d].road_px, full[d].class_px) == (
+            windowed[d].occupancy,
+            windowed[d].vehicle_px,
+            windowed[d].road_px,
+            windowed[d].class_px,
+        )
+
+
+def test_many_directions_uses_bincount_path():
+    """방향 수가 많아 uint8 로 합칠 수 없을 때(64방향 이상)도 정확해야 한다."""
+    road = np.zeros((10, 200), np.uint8)
+    for d in range(1, 101):
+        road[:, (d - 1) * 2 : d * 2] = d
+    vlabel = np.zeros_like(road)
+    vlabel[0:5, 0:2] = 1  # 방향 1 에 car 10px
+    res = compute_occupancy(VehicleResult(label_map=vlabel, instances=[]), road, 100)
+    assert res[1].road_px == 20 and res[1].class_px["car"] == 10
+    assert abs(res[1].occupancy - 0.5) < 1e-9
+    assert res[100].vehicle_px == 0

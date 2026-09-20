@@ -8,6 +8,7 @@ MJPEG 스트림은 최신 프레임에 오버레이를 그려 내보낸다.
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,11 +23,16 @@ from app.db.session import SessionLocal
 from app.ml.occupancy import DirectionMetrics, compute_occupancy
 from app.ml.registry import get_vehicle_segmenter
 from app.ml.roi import Roi, infer_in_roi, roi_from_mask
-from app.ml.render import DIRECTION_COLORS, encode_jpeg, hex_to_bgr, render_overlay
+from app.ml.render import DIRECTION_COLORS, RoadLayer, encode_jpeg, hex_to_bgr, render_overlay
 from app.ml.vehicle_seg import VEHICLE_CLASSES
 from app.services import its_client, media
 
 log = logging.getLogger(__name__)
+
+RECONNECT_BASE = 2.0  # 재접속 대기 시작값(초)
+RECONNECT_MAX = 60.0
+BLOCKED_WAIT = 300.0  # 서버가 접속을 거부(HTTP 4xx)할 때 쉬는 시간
+REFRESH_MIN_INTERVAL = 60.0  # ITS URL 재조회 최소 간격
 
 
 @dataclass
@@ -77,6 +83,7 @@ class StreamWorker(threading.Thread):
         self.source_type: str = ""
         self.road_label: np.ndarray | None = None
         self.roi: Roi | None = None
+        self._road_layer: RoadLayer | None = None  # 렌더용 도로 레이어 (마스크가 바뀔 때만 재생성)
         self.interval: float = 0.0  # 초. 0 = 실시간(INFER_FPS)
         self.n_directions: int = 0
         self.direction_names: dict[int, str] = {}
@@ -88,6 +95,7 @@ class StreamWorker(threading.Thread):
         self._acc: dict[int, dict[str, float]] = {}
         self._acc_n = 0
         self._last_flush = time.time()
+        self._last_refresh = 0.0
 
     # ---------- 설정 ----------
     def load_config(self) -> None:
@@ -129,6 +137,10 @@ class StreamWorker(threading.Thread):
         age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600 if fetched else 1e9
         if not force and age_h < self.settings.its_url_ttl_hours:
             return
+        # 열기에 실패할 때마다 ITS 를 다시 부르면 초당 몇 번씩 호출하게 된다.
+        if time.time() - self._last_refresh < REFRESH_MIN_INTERVAL:
+            return
+        self._last_refresh = time.time()
         new_url = its_client.refresh_url(
             self._cam_meta["its_cctv_name"] or self.name,
             self._cam_meta["lon"],
@@ -151,6 +163,10 @@ class StreamWorker(threading.Thread):
     def stop(self) -> None:
         self._stop.set()
 
+    def _wait_jitter(self, seconds: float) -> None:
+        """카메라들이 같은 순간에 몰려서 재접속하지 않도록 대기 시간을 조금 흩뜨린다."""
+        self._stop.wait(seconds * (0.75 + 0.5 * random.random()))
+
     def run(self) -> None:
         try:
             self.load_config()
@@ -164,31 +180,54 @@ class StreamWorker(threading.Thread):
             self.state.status, self.state.error = "error", f"차량 모델 로드 실패: {e}"
             log.error("[cam %s] %s", self.camera_id, self.state.error)
             return
-        backoff = 2.0
+        backoff = RECONNECT_BASE
         fails = 0
         while not self._stop.is_set():
             try:
                 self._maybe_refresh_its_url(force=fails >= 2)
                 cap = media.open_capture(self.source)
+            except media.StreamBlocked as e:
+                # 서버가 막은 상태라 빠른 재시도는 차단만 길어지게 한다.
+                fails += 1
+                self.state.status, self.state.error = "reconnecting", str(e)
+                log.warning("[%s] %s — %.0f초 후 재시도", self.name, e, BLOCKED_WAIT)
+                self._wait_jitter(BLOCKED_WAIT)
+                backoff = RECONNECT_BASE
+                continue
             except Exception as e:
                 fails += 1
                 self.state.status, self.state.error = "reconnecting", str(e)
                 log.warning("[%s] 열기 실패(%d): %s", self.name, fails, e)
-                self._stop.wait(min(backoff, 30))
-                backoff *= 1.5
+                self._wait_jitter(backoff)
+                backoff = min(backoff * 2, RECONNECT_MAX)
                 continue
-            backoff, fails = 2.0, 0
             self.state.status, self.state.error = "running", None
+            seq0 = self.state.seq
+            blocked = False
             try:
                 if self.interval >= 1.0:
                     self._interval_loop(cap, seg)
                 else:
                     self._loop(cap, seg)
+            except media.StreamBlocked as e:  # 주기 모드에서 다시 열 때 막힌 경우
+                blocked = True
+                log.warning("[%s] %s — %.0f초 후 재시도", self.name, e, BLOCKED_WAIT)
+                self.state.status, self.state.error = "reconnecting", str(e)
             except Exception as e:
-                log.exception("[%s] 루프 오류: %s", self.name, e)
+                log.warning("[%s] 루프 오류: %s", self.name, e)
                 self.state.status, self.state.error = "reconnecting", str(e)
             finally:
                 cap.release()
+            if blocked:
+                self._wait_jitter(BLOCKED_WAIT)
+                backoff = RECONNECT_BASE
+            elif self.state.seq > seq0:
+                # 프레임을 실제로 받아 본 뒤에만 대기 시간을 되돌린다.
+                # (열기만 성공하고 바로 끊기는 경우 2초 간격으로 계속 두드리게 된다)
+                backoff, fails = RECONNECT_BASE, 0
+            else:
+                self._wait_jitter(backoff)
+                backoff = min(backoff * 2, RECONNECT_MAX)
             if not self._stop.is_set():
                 self._stop.wait(1.0)
         self._flush(force=True)
@@ -286,10 +325,8 @@ class StreamWorker(threading.Thread):
                 if not first:
                     cap.release()
                     self._maybe_refresh_its_url()
-                    try:
-                        cap = media.open_capture(self.source)
-                    except Exception as e:
-                        raise RuntimeError(f"스트림 열기 실패: {e}")
+                    # 열기 실패는 그대로 올려 보낸다 (StreamBlocked 여야 바깥에서 길게 쉰다)
+                    cap = media.open_capture(self.source)
                 for _ in range(4):  # 앞쪽 프레임은 버리고 안정된 프레임
                     ok, f = cap.read()
                     if ok:
@@ -325,9 +362,10 @@ class StreamWorker(threading.Thread):
         if self.road_label.shape != frame.shape[:2]:
             self.road_label = cv2.resize(self.road_label, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
             self.roi = roi_from_mask(self.road_label, self.settings.roi_pad)
+            self._road_layer = None
         # 도로 마스크 영역 안에서만 차량 세그멘테이션
         res = infer_in_roi(seg, frame, self.road_label, self.roi, crop=self.settings.roi_crop)
-        metrics = compute_occupancy(res, self.road_label, self.n_directions)
+        metrics = compute_occupancy(res, self.road_label, self.n_directions, self.roi)
         with self._lock:
             self.state.frame = frame
             self.state.vehicle_label = res.label_map
@@ -411,7 +449,9 @@ class StreamWorker(threading.Thread):
                 nm = "ALL" if d == 0 else f"D{d}"
                 lvl = congestion_level(m.occupancy, self.settings.congestion_thresholds) or ""
                 hud.append(f"{nm} {m.occupancy * 100:5.1f}%  n={sum(m.counts.values())}  {_ascii_level(lvl)}")
-        img = render_overlay(frame, vlabel, self.road_label, mode=mode, direction_colors=self.direction_colors, hud=hud)
+        if self._road_layer is None or self._road_layer.shape != frame.shape[:2]:
+            self._road_layer = RoadLayer(self.road_label, self.direction_colors)
+        img = render_overlay(frame, vlabel, self.road_label, mode=mode, direction_colors=self.direction_colors, hud=hud, road_layer=self._road_layer)
         data = encode_jpeg(img, self.settings.stream_jpeg_quality)
         with self._lock:
             self._render_cache[key] = (seq, data)

@@ -72,7 +72,7 @@ def _run(job_id: int) -> None:
                     if roi is None:
                         roi = roi_from_mask(road)
                     res = infer_in_roi(seg, frame, road, roi)
-                    metrics = compute_occupancy(res, road, n_dir)
+                    metrics = compute_occupancy(res, road, n_dir, roi)
                     sec = int(idx / fps)
                     b = bucket.setdefault(sec, {})
                     n_in_bucket[sec] = n_in_bucket.get(sec, 0) + 1

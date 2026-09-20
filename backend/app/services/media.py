@@ -22,10 +22,37 @@ def is_file_source(source: str) -> bool:
     return not source.lower().startswith(("http://", "https://", "rtsp://", "rtmp://", "udp://"))
 
 
+class StreamBlocked(RuntimeError):
+    """서버가 접속을 거부했다(HTTP 4xx). 바로 다시 시도해도 소용없는 상태.
+
+    ITS CCTV(cctvsec.ktict.co.kr)는 재접속이 잦은 IP 를 한동안 403 으로 막는다.
+    이때 빠르게 재시도하면 차단이 더 길어지므로 호출 측에서 길게 쉬어야 한다.
+    """
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
+def _http_status(url: str, timeout: float = 5.0) -> int | None:
+    """열기에 실패한 이유가 HTTP 에러인지 확인한다 (네트워크 문제면 None)."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            return client.get(url, headers={"Range": "bytes=0-0"}).status_code
+    except Exception:
+        return None
+
+
 def open_capture(source: str) -> cv2.VideoCapture:
     cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
     if not cap.isOpened():
         cap.release()
+        if source.lower().startswith(("http://", "https://")):
+            code = _http_status(source)
+            if code is not None and 400 <= code < 500:
+                raise StreamBlocked(f"서버가 접속을 거부했습니다 (HTTP {code})", code)
         raise RuntimeError(f"영상 소스를 열 수 없습니다: {source[:80]}")
     return cap
 

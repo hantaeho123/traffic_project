@@ -253,6 +253,10 @@ export const api = {
   system: () => req<any>(apiUrl('/api/system/status')),
   its: {
     status: () => req<{ configured: boolean }>(apiUrl('/api/its/status')),
+    suggestHeading: (p: { lat: number; lon: number; route?: string | null; road_type?: string }) =>
+      req<{ axis_deg: number; opposite_deg: number; linearity: number; used_route: boolean; route: string | null; neighbors: { name: string; lat: number; lon: number }[] }>(
+        apiUrl(`/api/its/suggest-heading?` + new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])))),
+      ),
     search: (p: { road_type: string; cctv_type: string; min_x: number; max_x: number; min_y: number; max_y: number }) =>
       req<{ count: number; items: ItsCctv[] }>(apiUrl(`/api/its/search?` + new URLSearchParams(Object.fromEntries(Object.entries(p).map(([k, v]) => [k, String(v)])))),
       ),

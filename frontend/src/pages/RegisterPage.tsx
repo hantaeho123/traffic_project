@@ -311,7 +311,7 @@ export default function RegisterPage() {
           </Card>
         </div>
           <Card title="방향 · 도로 · 지도 표시" icon={<Compass size={16} />} actions={<span className="muted">선택 사항 · 나중에 상세 페이지에서도 지정 가능</span>}>
-            <DirectionMapEditor directions={directions} onChange={setDirections} cameraLat={meta.lat ? +meta.lat : null} cameraLon={meta.lon ? +meta.lon : null} />
+            <DirectionMapEditor directions={directions} onChange={setDirections} cameraLat={meta.lat ? +meta.lat : null} cameraLon={meta.lon ? +meta.lon : null} route={meta.route || null} roadType={selectedIts?.road_type ?? 'ex'} />
           </Card>
         </div>
       )}

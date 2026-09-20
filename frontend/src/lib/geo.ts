@@ -25,6 +25,26 @@ export function destination(p: [number, number], headingDeg: number, dist: numbe
 }
 
 export const COMPASS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서']
+/** 진행 각도 → '북동행' 같은 기본 이름 */
+export function headingName(h: number): string {
+  return `${COMPASS[Math.round(h / 45) % 8]}행`
+}
+/** 여러 진행 각도의 도로 축 (0~180, 양방향 구분 없이) */
+export function axisOf(headings: number[]): number | null {
+  if (!headings.length) return null
+  let c = 0, s = 0
+  headings.forEach((h) => { const r = (2 * h * Math.PI) / 180; c += Math.cos(r); s += Math.sin(r) })
+  return ((((Math.atan2(s, c) * 180) / Math.PI) / 2) + 180) % 180
+}
+/** 두 각도 차이 (0~180) */
+export function angleDiff(a: number, b: number): number {
+  const d = Math.abs(((a - b) % 360) + 360) % 360
+  return d > 180 ? 360 - d : d
+}
+/** 작은 회전 화살표 SVG 문자열 (배지 안에 넣는 용도) */
+export function miniArrowSvg(heading: number, color: string, size = 12): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 32 32" style="transform:rotate(${heading}deg);flex:none"><path d="M16 2 L28 20 L20 18 L20 30 L12 30 L12 18 L4 20 Z" fill="${color}" stroke="#0b0b0b" stroke-width="2" stroke-linejoin="round"/></svg>`
+}
 export function compass(h: number | null | undefined): string {
   if (h == null) return '미지정'
   return `${COMPASS[Math.round(h / 45) % 8]} ${Math.round(h)}°`
