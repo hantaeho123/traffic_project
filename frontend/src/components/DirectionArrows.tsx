@@ -1,6 +1,6 @@
 import { Marker, Tooltip, useMapEvents } from 'react-leaflet'
 import type { Direction } from '../api/client'
-import { levelColor, pct } from '../lib/format'
+import { dirShort, levelColor, pct } from '../lib/format'
 import { anchorOf, arrowIcon, compass } from '../lib/geo'
 
 export interface DirValue {
@@ -40,7 +40,9 @@ export default function DirectionArrows({
         const a = anchorOf(d, cam)
         if (!a || d.heading_deg == null) return null
         const v = values[d.index] ?? { value: null, level: null }
-        const label = metric === 'occupancy' ? (v.value == null ? '–' : `${Math.round(v.value * 100)}%`) : v.vehicles == null ? '–' : `${Math.round(v.vehicles)}대`
+        if (d.measured === false) return null // 미측정 방면은 화살표를 그리지 않는다
+        const num = metric === 'occupancy' ? (v.value == null ? '–' : `${Math.round(v.value * 100)}%`) : v.vehicles == null ? '–' : `${Math.round(v.vehicles)}대`
+        const label = `${dirShort(d)} ${num}`
         return (
           <Marker
             key={`${cam.id}-${d.index}`}

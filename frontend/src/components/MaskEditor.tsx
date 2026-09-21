@@ -470,7 +470,7 @@ export default function MaskEditor({ imageUrl, width, height, snapshotId, camera
           <div key={d.index} className="group row" style={{ gap: 4, padding: '3px 6px', background: 'var(--panel-2)', border: `1px solid ${current === d.index ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, cursor: 'pointer' }} onClick={() => setCurrent(d.index)}>
             <span className="kbd">{d.index}</span>
             <input type="color" value={d.color} onChange={(e) => onDirectionsChange(directions.map((x) => (x.index === d.index ? { ...x, color: e.target.value } : x)))} onClick={(e) => e.stopPropagation()} style={{ width: 26, height: 26 }} />
-            <input value={d.name} onChange={(e) => onDirectionsChange(directions.map((x) => (x.index === d.index ? { ...x, name: e.target.value } : x)))} onClick={(e) => e.stopPropagation()} style={{ width: 120, padding: '3px 6px' }} />
+            <input value={d.destination ?? ''} placeholder="방면 (예: 서울)" title="화면 속 표지판의 목적지. 예: ⬇ 부산 · 서울 ⬆ → 이 색 영역이 서울로 가는 차로면 '서울'" onChange={(e) => onDirectionsChange(directions.map((x) => (x.index === d.index ? { ...x, destination: e.target.value, name: e.target.value.trim() ? `${e.target.value.trim()} 방면` : `방향 ${x.index}` } : x)))} onClick={(e) => e.stopPropagation()} style={{ width: 120, padding: '3px 6px' }} />
             <span className="muted num">{(((st[d.index] || 0) / total) * 100).toFixed(1)}%</span>
           </div>
         ))}

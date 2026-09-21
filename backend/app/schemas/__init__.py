@@ -13,7 +13,9 @@ class DirectionIn(BaseModel):
     index: int = Field(ge=1, le=8)
     name: str
     color: str = "#2a78d6"
-    road: str | None = None  # 소속 도로 (예: 경부선 본선, 강동IC 진출램프)
+    road: str | None = None  # 노선 (예: 경부선, 강동IC 진출램프)
+    destination: str | None = None  # 방면 = 표지판 목적지 (예: 서울)
+    heading_source: str | None = Field(default=None, pattern="^(auto|manual)$")
     heading_deg: float | None = Field(default=None, ge=0, lt=360)  # 진행 방향 (북=0, 시계방향)
     lat: float | None = None  # 지도 화살표 위치 (없으면 카메라 좌표)
     lon: float | None = None

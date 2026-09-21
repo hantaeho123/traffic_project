@@ -58,7 +58,10 @@ export interface Direction {
   index: number
   name: string
   color: string
-  road?: string | null // 소속 도로 (한 CCTV 에 도로가 여러 개일 때)
+  road?: string | null // 노선 (한 CCTV 에 도로가 여러 개일 때 영역마다 다름)
+  destination?: string | null // 방면 = 화면 표지판의 목적지 (예: 서울)
+  heading_source?: 'auto' | 'manual' | null
+  measured?: boolean // 마스크에 칠해져 실제로 측정되는지
   heading_deg?: number | null // 진행 방향 (북=0, 시계방향)
   lat?: number | null // 지도 화살표 위치
   lon?: number | null
@@ -75,6 +78,7 @@ export interface DirectionLive {
   class_px: Record<string, number>
   level: string | null
   road?: string | null
+  destination?: string | null
 }
 
 export interface LiveState {
@@ -223,6 +227,18 @@ export interface Capture {
   url: string
 }
 
+export interface RouteSegment {
+  camera_id: number
+  camera_name: string
+  direction_index: number
+  name: string
+  destination: string | null
+  route: string
+  sign: number
+  coords: number[][] // 진행 방향 순서
+  extent_m: [number, number]
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -251,6 +267,15 @@ const json = (body: unknown) => ({ body: JSON.stringify(body) })
 
 export const api = {
   system: () => req<any>(apiUrl('/api/system/status')),
+  routes: {
+    view: () => req<{ lines: Record<string, number[][][]>; segments: RouteSegment[] }>(apiUrl('/api/routes/view')),
+    near: (p: { route: string; lat: number; lon: number; road_type?: string | null }) =>
+      req<{ route: string; distance_m: number; coords: number[][]; heading_forward: number }>(
+        apiUrl(`/api/routes/near?` + new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])))),
+      ),
+    resolve: (b: { route?: string | null; lat?: number | null; lon?: number | null; road_type?: string | null; destinations: string[] }) =>
+      req<Record<string, { ok: boolean; heading?: number; sign?: number; confidence?: string; reason: string }>>(apiUrl('/api/routes/resolve'), { method: 'POST', ...json(b) }),
+  },
   its: {
     status: () => req<{ configured: boolean }>(apiUrl('/api/its/status')),
     suggestHeading: (p: { lat: number; lon: number; route?: string | null; road_type?: string }) =>
