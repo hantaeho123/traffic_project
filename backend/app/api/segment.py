@@ -42,7 +42,8 @@ def _out(mask: np.ndarray, added: int = 0) -> MaskOut:
 
 
 def _with_vehicles(img: np.ndarray, mask: np.ndarray, enabled: bool) -> MaskOut:
-    if not enabled or not mask.any():
+    """점·박스 결과에 SAM3 로 찾은 차량 중 도로에 닿은 것을 합친다 (SAM3 가 없으면 그대로)."""
+    if not enabled or not mask.any() or not get_road_segmenter().has_sam3:
         return _out(mask)
     try:
         filled, added = road_fill.fill_binary(mask, road_fill.detect_vehicles(img))
@@ -68,10 +69,16 @@ def segment_text(body: SegmentTextIn, db: Session = Depends(get_db)):
             400, "텍스트 프롬프트는 SAM3 가중치가 필요합니다. scripts/download_sam3.py 로 받거나 점/박스 프롬프트를 사용하세요."
         )
     try:
-        mask = seg.segment_text(img, body.text, body.conf)
+        if not body.fill_vehicles:
+            return _out(seg.segment_text(img, body.text, body.conf))
+        # SAM3 한 번 호출로 도로와 차량(car, truck, bus)을 같이 찾고, 도로에 닿은 차량만 도로에 합친다
+        road, veh = road_fill.road_with_vehicles(img, body.text, body.conf)
     except Exception as e:
         raise HTTPException(500, f"SAM3 텍스트 추론 실패: {e}")
-    return _with_vehicles(img, mask, body.fill_vehicles)
+    if not road.any():
+        return _out(road)
+    filled, added = road_fill.fill_binary(road, veh)
+    return _out(filled, added)
 
 
 @router.post("/prompt", response_model=MaskOut)

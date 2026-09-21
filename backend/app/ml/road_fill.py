@@ -2,8 +2,8 @@
 
 점유율의 분모는 '차량이 덮을 수 있는 노면 전체' 여야 한다. SAM3 의 "road" 는 보이는 노면만 잡으므로
 스냅샷에 서 있던 차량 자리가 구멍/홈으로 빠지고, 막힐수록 분모가 작아져 점유율이 부풀려진다.
-그래서 같은 스냅샷에서 파인튜닝 YOLO 로 차량을 찾아, 도로에 닿아 있는 차량은 도로에 합치고
-도로로 완전히 둘러싸인 작은 구멍도 메운다.
+그래서 도로 단계는 SAM3 만으로: 한 번의 호출로 road 와 car/truck/bus 를 같이 찾고,
+도로에 닿아 있는 차량만 도로에 합친다(주차장·측도의 차량은 제외). 도로로 둘러싸인 작은 구멍도 메운다.
 """
 
 from __future__ import annotations
@@ -14,14 +14,34 @@ import numpy as np
 TOUCH_PX = 12  # 차량과 도로 사이 이 정도 틈은 닿은 것으로 본다
 MIN_TOUCH = 0.10  # 차량 둘레 중 도로와 닿은 비율 하한
 HOLE_MAX_FRAC = 0.02  # 이보다 큰 구멍(프레임 대비)은 중앙분리대 등일 수 있어 메우지 않는다
-FILL_CONF = 0.15  # 차량은 놓치는 것보다 과하게 잡는 편이 안전 (도로에 닿은 것만 합치므로)
+VEHICLE_CONCEPTS = ["car", "truck", "bus"]
+
+
+def road_with_vehicles(img: np.ndarray, road_text: str = "road", conf: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """SAM3 한 번 호출 → (도로 마스크, 차량 마스크). road_text 는 쉼표로 여러 개 가능."""
+    from app.ml.registry import get_road_segmenter
+
+    road_terms = [t.strip() for t in road_text.split(",") if t.strip()] or ["road"]
+    road_terms = [t for t in road_terms if t not in VEHICLE_CONCEPTS] or ["road"]
+    masks = get_road_segmenter().segment_concepts(img, road_terms + VEHICLE_CONCEPTS, conf)
+    road = np.zeros(img.shape[:2], bool)
+    for t in road_terms:
+        road |= masks[t]
+    veh = np.zeros(img.shape[:2], bool)
+    for t in VEHICLE_CONCEPTS:
+        veh |= masks[t]
+    return road, veh
 
 
 def detect_vehicles(img: np.ndarray) -> np.ndarray:
-    """스냅샷의 차량 합집합 마스크 (bool)."""
-    from app.ml.registry import get_vehicle_segmenter
+    """스냅샷의 차량 합집합 마스크 (SAM3: car, truck, bus)."""
+    from app.ml.registry import get_road_segmenter
 
-    return get_vehicle_segmenter().infer(img, conf=FILL_CONF).label_map > 0
+    masks = get_road_segmenter().segment_concepts(img, VEHICLE_CONCEPTS)
+    out = np.zeros(img.shape[:2], bool)
+    for m in masks.values():
+        out |= m
+    return out
 
 
 def _components(mask: np.ndarray):
