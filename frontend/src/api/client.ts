@@ -178,6 +178,7 @@ export interface MaskOut {
   width: number
   height: number
   backend: string
+  vehicles_added?: number
 }
 
 export interface Job {
@@ -299,7 +300,7 @@ export const api = {
   },
   segment: {
     status: () => req<{ backend: string; text_prompt: boolean; point_prompt: boolean; box_prompt: boolean }>(apiUrl('/api/segment/status')),
-    text: (b: { camera_id?: number; snapshot_id?: string; text: string; conf?: number }) => req<MaskOut>(apiUrl('/api/segment/text'), { method: 'POST', ...json(b) }),
+    text: (b: { camera_id?: number; snapshot_id?: string; text: string; conf?: number}) => req<MaskOut>(apiUrl('/api/segment/text'), { method: 'POST', ...json(b) }),
     prompt: (b: { camera_id?: number; snapshot_id?: string; points?: number[][]; labels?: number[]; boxes?: number[][] }) =>
       req<MaskOut>(apiUrl('/api/segment/prompt'), { method: 'POST', ...json(b) }),
   },

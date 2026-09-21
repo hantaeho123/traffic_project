@@ -103,6 +103,7 @@ class SegmentTextIn(BaseModel):
     snapshot_id: str | None = None  # 등록 전 임시 스냅샷
     text: str = "road"
     conf: float | None = None
+    fill_vehicles: bool = True  # 스냅샷의 차량 자리도 도로로 (분모 = 노면 전체). 화면에서는 항상 켬
 
 
 class SegmentPromptIn(BaseModel):
@@ -111,6 +112,7 @@ class SegmentPromptIn(BaseModel):
     points: list[list[float]] | None = None  # [[x,y],...]
     labels: list[int] | None = None  # 1=포함 0=제외
     boxes: list[list[float]] | None = None  # [[x1,y1,x2,y2],...]
+    fill_vehicles: bool = True
 
 
 class MaskOut(BaseModel):
@@ -119,6 +121,7 @@ class MaskOut(BaseModel):
     width: int
     height: int
     backend: str
+    vehicles_added: float = 0.0  # 차량 자리로 채운 픽셀 비율 (프레임 대비)
 
 
 # ---------- 응용 그룹 ----------
